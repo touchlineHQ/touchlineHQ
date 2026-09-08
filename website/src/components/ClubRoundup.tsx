@@ -7,85 +7,80 @@ import {
 import {
   IconAlertCircle, IconSearch, IconCopy, IconCheck, IconBrandWhatsapp,
   IconBrandTwitter, IconMail, IconShare, IconClockExclamation, IconTrophy,
-  IconBallFootball,
 } from '@tabler/icons-react';
 import { loadClubIndex, loadClubFeed } from '../data';
 import type { FeedClubEntry } from '../data';
 import type { ClubFeed } from '../types';
 import {
-  buildRoundup, defaultWeek, weeksWithResults, addDays, formatDayRange, formatDayShort,
-  formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, SOCIAL_LIMIT,
+  buildRoundup, defaultWeek, weeksWithResults, addDays, formatDayRange, formatKickOffLabel,
+  formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, unscoredMatches,
+  SOCIAL_LIMIT,
 } from '../utils/roundup';
-import type { Roundup, RoundupLine, RoundupUnscoredLine } from '../utils/roundup';
+import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
 import { copyTextToClipboard } from '../utils/clipboard';
 
 type Format = 'whatsapp' | 'social' | 'email';
 
 const outcomeColor: Record<'W' | 'D' | 'L', string> = { W: 'green', D: 'yellow', L: 'red' };
 
-function ResultRow({ line }: { line: RoundupLine }) {
+/** Badge matching the coloured dot the message uses for this kind of match. */
+function MatchBadge({ match }: { match: RoundupMatch }) {
+  if (match.kind === 'result') {
+    return (
+      <Badge color={outcomeColor[match.outcome]} variant="filled" size="xs" radius="sm">
+        {match.outcome}
+      </Badge>
+    );
+  }
+  if (match.kind === 'derby') {
+    return <Badge color="gray" variant="filled" size="xs" radius="sm">Derby</Badge>;
+  }
+  return match.reason === 'friendly'
+    ? <Badge color="blue" variant="filled" size="xs" radius="sm">Friendly</Badge>
+    : <Badge color="blue" variant="light" size="xs" radius="sm">No score</Badge>;
+}
+
+function matchText(match: RoundupMatch): string {
+  if (match.kind === 'result') {
+    return `${match.team} ${match.goalsFor}–${match.goalsAgainst} ${match.opponent}`;
+  }
+  if (match.kind === 'derby') {
+    return `${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`;
+  }
+  return `${match.team} vs ${match.opponent}`;
+}
+
+function MatchRow({ match }: { match: RoundupMatch }) {
   return (
     <Paper p="sm" withBorder radius="md">
       <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
         <Group gap="xs">
-          {line.kind === 'result' ? (
-            <Badge color={outcomeColor[line.outcome]} variant="filled" size="xs" radius="sm">
-              {line.outcome}
-            </Badge>
-          ) : (
-            <Badge color="gray" variant="filled" size="xs" radius="sm">Derby</Badge>
-          )}
-          {line.division && <Badge variant="light" size="xs">{line.division}</Badge>}
+          <MatchBadge match={match} />
+          {match.division && <Badge variant="light" size="xs">{match.division}</Badge>}
         </Group>
-        <Text size="xs" c="dimmed">{formatDayShort(line.date)} · {line.time}</Text>
+        <Text size="xs" c="dimmed">{formatKickOffLabel(match.date, match.time)}</Text>
       </Group>
-      <Text fw={700} size="sm" ta="center">
-        {line.kind === 'result'
-          ? `${line.team} ${line.goalsFor}–${line.goalsAgainst} ${line.opponent}`
-          : `${line.homeTeam} ${line.homeScore}–${line.awayScore} ${line.awayTeam}`}
+      <Text fw={700} size="sm" ta="center" c={match.kind === 'unscored' ? 'dimmed' : undefined}>
+        {matchText(match)}
       </Text>
     </Paper>
   );
 }
 
-const unscoredBadge: Record<RoundupUnscoredLine['reason'], { label: string; color: string }> = {
-  friendly: { label: 'Friendly', color: 'blue' },
-  'age-group': { label: 'No score', color: 'gray' },
-  withheld: { label: 'No score', color: 'gray' },
-};
-
-function UnscoredRow({ line }: { line: RoundupUnscoredLine }) {
-  const badge = unscoredBadge[line.reason];
-  return (
-    <Paper p="sm" withBorder radius="md">
-      <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
-        <Group gap="xs">
-          <Badge color={badge.color} variant="filled" size="xs" radius="sm">{badge.label}</Badge>
-          {line.division && <Badge variant="light" size="xs">{line.division}</Badge>}
-        </Group>
-        <Text size="xs" c="dimmed">{formatDayShort(line.date)} · {line.time}</Text>
-      </Group>
-      <Text fw={700} size="sm" ta="center" c="dimmed">
-        {line.team} vs {line.opponent}
-      </Text>
-    </Paper>
-  );
-}
-
-/** Say why these have no score, without claiming more than the feed supports. */
+/** Say why some matches have no score, without claiming more than the feed supports. */
 function unscoredExplanation(lines: RoundupUnscoredLine[]): string {
   const hasFriendly = lines.some(l => l.reason === 'friendly');
   const hasAgeGroup = lines.some(l => l.reason === 'age-group');
   if (hasAgeGroup && hasFriendly) {
-    return 'Friendlies, and age groups below U12 where the league publishes fixtures but not scores. These are played, not pending — they stay out of the record.';
+    return 'Some matches have no score: friendlies carry no result, and below U12 the league publishes fixtures but not scores. They were played — they just stay out of the record.';
   }
   if (hasAgeGroup) {
-    return 'Below U12 the league publishes fixtures but not scores. These were played — they just have no result to report, so they stay out of the record.';
+    return 'Below U12 the league publishes fixtures but not scores. Those matches were played — they just stay out of the record.';
   }
   if (hasFriendly) {
     return 'Friendlies carry no recorded result, so they stay out of the record.';
   }
-  return 'The league withholds the score for these matches, so they stay out of the record.';
+  return 'The league withholds the score for some of these matches, so they stay out of the record.';
 }
 
 function SummaryChips({ roundup }: { roundup: Roundup }) {
@@ -222,6 +217,8 @@ export function ClubRoundup() {
     [feed, week],
   );
 
+  const unscored = useMemo(() => (roundup ? unscoredMatches(roundup) : []), [roundup]);
+
   // The deep link is this page's own URL with the club and week pinned, so a
   // recipient who taps it lands on exactly the roundup that was sent.
   const link = useMemo(() => {
@@ -343,33 +340,17 @@ export function ClubRoundup() {
           <Stack gap="xs">
             <Group gap="xs">
               <IconTrophy size={16} color="var(--mantine-color-green-6)" />
-              <Text fw={600} size="sm">Results in this message</Text>
+              <Text fw={600} size="sm">This week's matches</Text>
             </Group>
-            {roundup.results.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                {roundup.unscored.length > 0
-                  ? 'No scored results this week — see below for what was played.'
-                  : 'No results published for this week.'}
-              </Text>
+            {roundup.matches.length === 0 ? (
+              <Text size="sm" c="dimmed">No results published for this week.</Text>
             ) : (
-              roundup.results.map(line => <ResultRow key={line.id} line={line} />)
+              roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
+            )}
+            {unscored.length > 0 && (
+              <Text size="xs" c="dimmed">{unscoredExplanation(unscored)}</Text>
             )}
           </Stack>
-
-          {roundup.unscored.length > 0 && (
-            <Stack gap="xs">
-              <Group gap="xs">
-                <IconBallFootball size={16} color="var(--mantine-color-gray-6)" />
-                <Text fw={600} size="sm">
-                  {roundup.unscored.every(l => l.reason === 'friendly')
-                    ? 'Friendlies'
-                    : roundup.results.length > 0 ? 'Also played' : 'Played this week'}
-                </Text>
-              </Group>
-              {roundup.unscored.map(line => <UnscoredRow key={line.id} line={line} />)}
-              <Text size="xs" c="dimmed">{unscoredExplanation(roundup.unscored)}</Text>
-            </Stack>
-          )}
 
           <Divider />
 

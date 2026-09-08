@@ -4,6 +4,7 @@ import {
   addDays, mondayOf, formatDayShort, formatDayRange, stripClubPrefix, getOutcome,
   weeksWithResults, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
   formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, ageGroupOf, unscoredReason,
+  formatKickOff, formatKickOffLabel, unscoredMatches,
 } from './roundup';
 
 const CLUB = 'East Leake';
@@ -123,6 +124,25 @@ describe('date helpers', () => {
     expect(mondayOf('2027-01-03')).toBe('2026-12-28');
   });
 
+  it('says kick-off times the way people at the ground do', () => {
+    expect(formatKickOff('10:00')).toBe('10am');
+    expect(formatKickOff('10:30')).toBe('10:30am');
+    expect(formatKickOff('13:00')).toBe('1pm');
+    expect(formatKickOff('14:45')).toBe('2:45pm');
+    expect(formatKickOff('12:00')).toBe('12pm');
+    expect(formatKickOff('00:30')).toBe('12:30am');
+  });
+
+  it('keeps a kick-off it cannot parse rather than inventing one', () => {
+    expect(formatKickOff('TBC')).toBe('TBC');
+    expect(formatKickOff('')).toBe('');
+  });
+
+  it('labels a kick-off with its weekday', () => {
+    expect(formatKickOffLabel('2026-09-06', '10:00')).toBe('Sun 10am');
+    expect(formatKickOffLabel('2026-09-05', '11:30')).toBe('Sat 11:30am');
+  });
+
   it('formats days and ranges without locale drift', () => {
     expect(formatDayShort('2026-09-06')).toBe('Sun 6 Sep');
     expect(formatDayRange('2026-09-05', '2026-09-06')).toBe('Sat 5 – Sun 6 Sep');
@@ -220,15 +240,16 @@ describe('buildRoundup', () => {
   it('covers the Mon–Sun window and nothing outside it', () => {
     expect(roundup.weekStart).toBe('2026-08-31');
     expect(roundup.weekEnd).toBe('2026-09-06');
-    expect(roundup.results.map(l => l.id)).not.toContain('old');
+    expect(roundup.matches.map(m => m.id)).not.toContain('old');
   });
 
-  it('orders lines by kick-off', () => {
-    expect(roundup.results.map(l => l.id)).toEqual(['r3', 'derby', 'r1', 'r2']);
+  it('puts every match in one list, in kick-off order', () => {
+    expect(roundup.matches.map(m => m.id))
+      .toEqual(['r3', 'derby', 'r1', 'r2', 'young', 'friendly']);
   });
 
   it('renders a club-v-club match once, neutrally', () => {
-    const derby = roundup.results.filter(l => l.id === 'derby');
+    const derby = roundup.matches.filter(m => m.id === 'derby');
     expect(derby).toHaveLength(1);
     expect(derby[0]).toMatchObject({
       kind: 'derby',
@@ -239,13 +260,13 @@ describe('buildRoundup', () => {
     });
   });
 
-  it('separates played-but-unscored matches from the results', () => {
-    expect(roundup.results.map(l => l.id)).not.toContain('young');
-    expect(roundup.unscored.map(l => l.id)).toEqual(['young', 'friendly']);
-    expect(roundup.unscored[0]).toMatchObject({
+  it('keeps unscored matches in the list but classifies why', () => {
+    const unscored = unscoredMatches(roundup);
+    expect(unscored.map(m => m.id)).toEqual(['young', 'friendly']);
+    expect(unscored[0]).toMatchObject({
       team: 'Whites U9', opponent: 'Sutton Bonington U9', reason: 'age-group',
     });
-    expect(roundup.unscored[1]).toMatchObject({ team: 'Reds U14', reason: 'friendly' });
+    expect(unscored[1]).toMatchObject({ team: 'Reds U14', reason: 'friendly' });
   });
 
   it('counts only scored, non-derby matches, so P equals W+D+L', () => {
@@ -264,7 +285,7 @@ describe('buildRoundup', () => {
 
   it('builds an empty roundup for a week with nothing in it', () => {
     const quiet = buildRoundup(makeFeed(), '2026-10-05');
-    expect(quiet.results).toHaveLength(0);
+    expect(quiet.matches).toHaveLength(0);
     expect(quiet.summary.played).toBe(0);
   });
 });
@@ -277,17 +298,19 @@ describe('message formats', () => {
     const text = formatWhatsApp(roundup, { link });
     expect(text).toContain('East Leake — Weekly Roundup');
     expect(text).toContain('Sat 5 – Sun 6 Sep');
-    expect(text).toContain('🟢 Blue U10 4–1 Ruddington Village U10');
-    expect(text).toContain('🔴 Reds U14 0–3 Radcliffe Olympic U14');
-    expect(text).toContain('⚪ Blue U10 2–1 Greens U10');
+    expect(text).toContain('🟢 Sun 10am · Blue U10 4–1 Ruddington Village U10');
+    expect(text).toContain('🔴 Sat 11am · Reds U14 0–3 Radcliffe Olympic U14');
+    expect(text).toContain('⚪ Sun 9am · Blue U10 2–1 Greens U10');
+    expect(text).toContain('🔵 Sun 12pm · Whites U9 vs Sutton Bonington U9');
+    expect(text).toContain('🔵 Sun 1pm · Reds U14 vs Gotham Rangers U14 (friendly)');
     expect(text).toContain('P3 · W1 D1 L1 · GF 6 GA 6');
     expect(text).toContain(link);
   });
 
   it('drops emoji and the link on request', () => {
     const text = formatWhatsApp(roundup, { emoji: false, includeLink: false });
-    expect(text).not.toMatch(/[⚽🟢🟡🔴📅📊]/u);
-    expect(text).toContain('(W) Blue U10 4–1 Ruddington Village U10');
+    expect(text).not.toMatch(/[⚽🟢🟡🔴🔵⚪📅📊]/u);
+    expect(text).toContain('(W) Sun 10am · Blue U10 4–1 Ruddington Village U10');
     expect(text).not.toContain('http');
   });
 
@@ -330,32 +353,37 @@ describe('message formats', () => {
     expect(body).not.toMatch(/[🟢🟡🔴]/u);
   });
 
-  it('lists played-but-unscored matches without calling them pending', () => {
+  it('keeps unscored matches inline and never calls them pending', () => {
     const text = formatWhatsApp(roundup, { link });
     expect(text).not.toMatch(/awaiting/i);
-    expect(text).toContain('🤝 Also played — no score published');
-    expect(text).toContain('• Whites U9 vs Sutton Bonington U9');
-    expect(text).toContain('• Reds U14 vs Gotham Rangers U14 (friendly)');
-    expect(formatEmailBody(roundup, { link })).toContain('Also played — no score published');
+    expect(text).not.toMatch(/also played/i);
+    // They sit in kick-off order among the scored results, not in their own block.
+    const lines = text.split('\n');
+    expect(lines.findIndex(l => l.includes('Whites U9')))
+      .toBeGreaterThan(lines.findIndex(l => l.includes('Ruddington Village')));
   });
 
-  it('calls the block Friendlies when that is all it holds', () => {
+  it('explains the blue dots from the reasons actually present', () => {
+    expect(formatWhatsApp(roundup, { link }))
+      .toContain('🔵 No score published — U11 and below, friendlies');
+
     const feed = makeFeed();
     feed.results = [makeResult({
-      id: 'fr', date: '2026-09-06', team: 'East Leake Blue U10',
+      id: 'fr', date: '2026-09-06', time: '14:00', team: 'East Leake Blue U10',
       opponent: 'Bunny FC U10', division: 'U10 Friendly',
       home_score: null, away_score: null, goals_for: null, goals_against: null,
     })];
-    const text = formatWhatsApp(buildRoundup(feed, WEEK));
-    expect(text).toContain('🤝 Friendlies');
+    const friendlyOnly = formatWhatsApp(buildRoundup(feed, WEEK));
+    expect(friendlyOnly).toContain('🔵 No score published — friendlies');
+    expect(friendlyOnly).not.toContain('U11 and below');
     // The week was played, so the message must not claim otherwise.
-    expect(text).not.toContain('No results published for this week.');
-    expect(text).toContain('Sun 6 Sep');
+    expect(friendlyOnly).not.toContain('No results published for this week.');
+    expect(friendlyOnly).toContain('🔵 Sun 2pm · Blue U10 vs Bunny FC U10 (friendly)');
   });
 
   it('says so plainly when a week has no results', () => {
     const quiet = buildRoundup(makeFeed(), '2026-10-05');
-    expect(quiet.unscored).toHaveLength(0);
+    expect(unscoredMatches(quiet)).toHaveLength(0);
     expect(formatWhatsApp(quiet)).toContain('No results published for this week.');
     expect(formatSocial(quiet).text).toContain('No results published this week.');
   });

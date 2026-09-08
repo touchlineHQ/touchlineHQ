@@ -47,8 +47,6 @@ export interface RoundupDerbyLine {
   division: string;
 }
 
-export type RoundupLine = RoundupResultLine | RoundupDerbyLine;
-
 /**
  * Why a played match has no score.
  *
@@ -67,6 +65,7 @@ export type UnscoredReason = 'friendly' | 'age-group' | 'withheld';
  * — the league deliberately withholding the score.
  */
 export interface RoundupUnscoredLine {
+  kind: 'unscored';
   id: string;
   date: string;
   time: string;
@@ -76,6 +75,9 @@ export interface RoundupUnscoredLine {
   division: string;
   reason: UnscoredReason;
 }
+
+/** Every match the club played in the week, scored or not. */
+export type RoundupMatch = RoundupResultLine | RoundupDerbyLine | RoundupUnscoredLine;
 
 export interface RoundupSummary {
   played: number;
@@ -92,9 +94,8 @@ export interface Roundup {
   weekStart: string;
   /** Sunday of the roundup week, "YYYY-MM-DD". */
   weekEnd: string;
-  results: RoundupLine[];
-  /** Played, but the league publishes no score for them. */
-  unscored: RoundupUnscoredLine[];
+  /** One chronological list — scored and unscored together, in kick-off order. */
+  matches: RoundupMatch[];
   summary: RoundupSummary;
   generated: string;
   stale: boolean;
@@ -104,6 +105,16 @@ export interface FormatOptions {
   includeLink?: boolean;
   emoji?: boolean;
   link?: string;
+}
+
+export function scoredMatches(roundup: Roundup): (RoundupResultLine | RoundupDerbyLine)[] {
+  return roundup.matches.filter(
+    (m): m is RoundupResultLine | RoundupDerbyLine => m.kind !== 'unscored',
+  );
+}
+
+export function unscoredMatches(roundup: Roundup): RoundupUnscoredLine[] {
+  return roundup.matches.filter((m): m is RoundupUnscoredLine => m.kind === 'unscored');
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +161,31 @@ export function formatDayRange(startIso: string, endIso: string): string {
     ? `${DAY_NAMES[start.getUTCDay()]} ${start.getUTCDate()}`
     : formatDayShort(startIso);
   return `${startLabel} – ${formatDayShort(endIso)}`;
+}
+
+/** Just the weekday: "Sun". */
+export function formatWeekday(iso: string): string {
+  return DAY_NAMES[parseIso(iso).getUTCDay()];
+}
+
+/**
+ * A kick-off the way anyone at a ground would say it: "10am", "10:30am", "1pm".
+ * Falls back to the raw value if Full-Time gave us something unexpected.
+ */
+export function formatKickOff(time: string): string {
+  const match = /^(\d{1,2}):(\d{2})/.exec(time ?? '');
+  if (!match) return time ?? '';
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return time;
+  const suffix = hours < 12 ? 'am' : 'pm';
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  return minutes === 0 ? `${hour12}${suffix}` : `${hour12}:${match[2]}${suffix}`;
+}
+
+/** "Sun 10am" — the prefix every match line opens with. */
+export function formatKickOffLabel(date: string, time: string): string {
+  return `${formatWeekday(date)} ${formatKickOff(time)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,9 +289,7 @@ function isStale(generated: string): boolean {
 export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
   const club = feed.club;
   const strip = (name: string) => stripClubPrefix(name, club);
-
-  const results: RoundupLine[] = [];
-  const unscored: RoundupUnscoredLine[] = [];
+  const matches: RoundupMatch[] = [];
 
   for (const group of groupById(feed.results.filter(r => inWeek(r.date, weekStart)))) {
     const [row] = group;
@@ -264,10 +298,10 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
       // Both sides belong to this club. Use the neutral home/away scores rather
       // than either row's club-side perspective, and award no outcome.
       if (row.home_score === null || row.away_score === null) {
-        unscored.push(toUnscored(row, strip));
+        matches.push(toUnscored(row, strip));
         continue;
       }
-      results.push({
+      matches.push({
         kind: 'derby',
         id: row.id,
         date: row.date,
@@ -283,10 +317,10 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
 
     const outcome = getOutcome(row);
     if (outcome === null) {
-      unscored.push(toUnscored(row, strip));
+      matches.push(toUnscored(row, strip));
       continue;
     }
-    results.push({
+    matches.push({
       kind: 'result',
       id: row.id,
       date: row.date,
@@ -301,16 +335,14 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     });
   }
 
-  results.sort(byKickOff);
-  unscored.sort(byKickOff);
+  matches.sort(byKickOff);
 
   return {
     club,
     weekStart,
     weekEnd: addDays(weekStart, 6),
-    results,
-    unscored,
-    summary: summarise(results),
+    matches,
+    summary: summarise(matches),
     generated: feed.generated,
     stale: isStale(feed.generated),
   };
@@ -321,6 +353,7 @@ function toUnscored(
   strip: (name: string) => string,
 ): RoundupUnscoredLine {
   return {
+    kind: 'unscored',
     id: row.id,
     date: row.date,
     time: row.time,
@@ -333,23 +366,23 @@ function toUnscored(
 }
 
 /**
- * Played/W/D/L and goals over the scored, non-derby lines. Derbies are left out
- * on purpose: a club-v-club match is simultaneously a win and a loss for the
- * club, so counting it would make the record say something untrue. Keeping them
- * out also keeps played === won + drawn + lost.
+ * Played/W/D/L and goals over the scored, non-derby matches. Derbies are left
+ * out on purpose: a club-v-club match is simultaneously a win and a loss for the
+ * club, so counting it would make the record say something untrue. Unscored
+ * matches have no result to count. Both exclusions keep played === W + D + L.
  */
-function summarise(lines: RoundupLine[]): RoundupSummary {
+function summarise(matches: RoundupMatch[]): RoundupSummary {
   const summary: RoundupSummary = {
     played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0,
   };
-  for (const line of lines) {
-    if (line.kind !== 'result') continue;
+  for (const match of matches) {
+    if (match.kind !== 'result') continue;
     summary.played += 1;
-    if (line.outcome === 'W') summary.won += 1;
-    else if (line.outcome === 'D') summary.drawn += 1;
+    if (match.outcome === 'W') summary.won += 1;
+    else if (match.outcome === 'D') summary.drawn += 1;
     else summary.lost += 1;
-    summary.goalsFor += line.goalsFor;
-    summary.goalsAgainst += line.goalsAgainst;
+    summary.goalsFor += match.goalsFor;
+    summary.goalsAgainst += match.goalsAgainst;
   }
   return summary;
 }
@@ -359,48 +392,56 @@ function summarise(lines: RoundupLine[]): RoundupSummary {
 // ---------------------------------------------------------------------------
 
 const OUTCOME_EMOJI: Record<'W' | 'D' | 'L', string> = { W: '🟢', D: '🟡', L: '🔴' };
+const DERBY_EMOJI = '⚪';
+const UNSCORED_EMOJI = '🔵';
 
-/**
- * The span the matches actually cover, which reads better than the full week.
- * Unscored matches count: a club playing only age-group football has no scored
- * results at all, and its header should still name the day everyone played.
- */
-function resultsRange(roundup: Roundup): string {
-  const dates = [...roundup.results, ...roundup.unscored].map(line => line.date).sort();
+/** The span the matches actually cover, which reads better than the full week. */
+function matchRange(roundup: Roundup): string {
+  const dates = roundup.matches.map(match => match.date).sort();
   if (dates.length === 0) return formatDayRange(roundup.weekStart, roundup.weekEnd);
   return formatDayRange(dates[0], dates[dates.length - 1]);
 }
 
-function scoreLine(line: RoundupLine, emoji: boolean): string {
-  if (line.kind === 'derby') {
-    const marker = emoji ? '⚪ ' : '';
-    return `${marker}${line.homeTeam} ${line.homeScore}–${line.awayScore} ${line.awayTeam}`;
+/** The coloured dot that opens a line; a bracketed letter when emoji are off. */
+function marker(match: RoundupMatch, emoji: boolean): string {
+  if (match.kind === 'result') {
+    return emoji ? `${OUTCOME_EMOJI[match.outcome]} ` : `(${match.outcome}) `;
   }
-  const marker = emoji ? `${OUTCOME_EMOJI[line.outcome]} ` : `(${line.outcome}) `;
-  return `${marker}${line.team} ${line.goalsFor}–${line.goalsAgainst} ${line.opponent}`;
+  // A derby and an unscored match both read unambiguously without emoji — the
+  // derby from its neutral scoreline, the unscored one from having no score.
+  if (match.kind === 'derby') return emoji ? `${DERBY_EMOJI} ` : '';
+  return emoji ? `${UNSCORED_EMOJI} ` : '';
+}
+
+/** The match itself, without the marker or the kick-off prefix. */
+function matchBody(match: RoundupMatch): string {
+  if (match.kind === 'result') {
+    return `${match.team} ${match.goalsFor}–${match.goalsAgainst} ${match.opponent}`;
+  }
+  if (match.kind === 'derby') {
+    return `${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`;
+  }
+  const suffix = match.reason === 'friendly' ? ' (friendly)' : '';
+  return `${match.team} vs ${match.opponent}${suffix}`;
+}
+
+/** "🟢 Sun 10am · Blue U10 4–1 Ruddington Village U10" */
+export function matchLine(match: RoundupMatch, emoji: boolean): string {
+  return `${marker(match, emoji)}${formatKickOffLabel(match.date, match.time)} · ${matchBody(match)}`;
 }
 
 /**
- * A friendly is worth naming on the line itself; the age-group and withheld
- * cases are covered by the block heading, so the line stays clean.
+ * One line explaining the blue dots, built only from the reasons actually
+ * present so it never claims a cause this week's matches don't have.
  */
-function unscoredLine(line: RoundupUnscoredLine): string {
-  const suffix = line.reason === 'friendly' ? ' (friendly)' : '';
-  return `${line.team} vs ${line.opponent}${suffix}`;
-}
-
-/**
- * "Friendlies" when that is all they are, otherwise say why there is no score.
- * "Also played" only makes sense alongside scored results; a club playing purely
- * age-group football has none, so the block speaks for the whole week instead.
- */
-function unscoredHeading(roundup: Roundup, emoji: boolean): string {
-  const label = roundup.unscored.every(line => line.reason === 'friendly')
-    ? 'Friendlies'
-    : roundup.results.length > 0
-      ? 'Also played — no score published'
-      : 'Played this week — no score published';
-  return `${emoji ? '🤝 ' : ''}${label}`;
+function unscoredNote(lines: RoundupUnscoredLine[], emoji: boolean): string | null {
+  if (lines.length === 0) return null;
+  const reasons = new Set(lines.map(line => line.reason));
+  const causes: string[] = [];
+  if (reasons.has('age-group')) causes.push('U11 and below');
+  if (reasons.has('friendly')) causes.push('friendlies');
+  const why = causes.length > 0 ? ` — ${causes.join(', ')}` : '';
+  return `${emoji ? `${UNSCORED_EMOJI} ` : ''}No score published${why}`;
 }
 
 function summaryLine(summary: RoundupSummary): string {
@@ -413,14 +454,12 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
   const blocks: string[] = [];
 
   blocks.push(
-    `${emoji ? '⚽ ' : ''}${roundup.club} — Weekly Roundup\n${resultsRange(roundup)}`,
+    `${emoji ? '⚽ ' : ''}${roundup.club} — Weekly Roundup\n${matchRange(roundup)}`,
   );
 
-  if (roundup.results.length > 0) {
-    blocks.push(roundup.results.map(line => scoreLine(line, emoji)).join('\n'));
-  } else if (roundup.unscored.length === 0) {
-    // With unscored matches the block below carries the week, so saying
-    // nothing was played would contradict the list right underneath it.
+  if (roundup.matches.length > 0) {
+    blocks.push(roundup.matches.map(match => matchLine(match, emoji)).join('\n'));
+  } else {
     blocks.push('No results published for this week.');
   }
 
@@ -428,13 +467,8 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
     blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
   }
 
-  if (roundup.unscored.length > 0) {
-    blocks.push(
-      `${unscoredHeading(roundup, emoji)}\n${roundup.unscored
-        .map(line => `• ${unscoredLine(line)}`)
-        .join('\n')}`,
-    );
-  }
+  const note = unscoredNote(unscoredMatches(roundup), emoji);
+  if (note) blocks.push(note);
 
   if (includeLink && link) blocks.push(`Full results:\n${link}`);
 
@@ -470,11 +504,11 @@ export function formatSocial(roundup: Roundup, options: FormatOptions = {}): Soc
   const compose = (shown: number, withTags: boolean): string => {
     const blocks: string[] = [record ? `${header}\n${record}` : header];
 
-    if (roundup.results.length === 0) {
+    if (roundup.matches.length === 0) {
       blocks.push('No results published this week.');
     } else {
-      const lines = roundup.results.slice(0, shown).map(line => scoreLine(line, emoji));
-      const hidden = roundup.results.length - shown;
+      const lines = roundup.matches.slice(0, shown).map(match => matchLine(match, emoji));
+      const hidden = roundup.matches.length - shown;
       if (hidden > 0) lines.push(`+${hidden} more`);
       blocks.push(lines.join('\n'));
     }
@@ -484,7 +518,7 @@ export function formatSocial(roundup: Roundup, options: FormatOptions = {}): Soc
     return blocks.join('\n\n');
   };
 
-  const total = roundup.results.length;
+  const total = roundup.matches.length;
   for (const withTags of [true, false]) {
     for (let shown = total; shown >= 1; shown--) {
       const text = compose(shown, withTags);
@@ -507,11 +541,11 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
   const { includeLink = true, emoji = false, link = '' } = options;
   const blocks: string[] = [];
 
-  blocks.push(`Results, ${resultsRange(roundup)}`);
+  blocks.push(`Results, ${matchRange(roundup)}`);
 
-  if (roundup.results.length > 0) {
-    blocks.push(roundup.results.map(line => `  ${scoreLine(line, emoji)}`).join('\n'));
-  } else if (roundup.unscored.length === 0) {
+  if (roundup.matches.length > 0) {
+    blocks.push(roundup.matches.map(match => `  ${matchLine(match, emoji)}`).join('\n'));
+  } else {
     blocks.push('  No results published for this week.');
   }
 
@@ -523,13 +557,8 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
     );
   }
 
-  if (roundup.unscored.length > 0) {
-    blocks.push(
-      `${unscoredHeading(roundup, emoji)}\n${roundup.unscored
-        .map(line => `  ${unscoredLine(line)}`)
-        .join('\n')}`,
-    );
-  }
+  const note = unscoredNote(unscoredMatches(roundup), emoji);
+  if (note) blocks.push(note);
 
   if (includeLink && link) blocks.push(`Full results: ${link}`);
   blocks.push('Results from FA Full-Time via touchlineHQ.');

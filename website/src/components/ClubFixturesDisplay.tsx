@@ -173,7 +173,9 @@ export function ClubFixturesDisplay({ feed }: Props) {
   const results = useMemo(() => {
     let rows: PastMatch[] = [
       ...feed.results.map(resultToPastMatch),
-      ...participation.map(participationToPastMatch),
+      // `played: false` marks a participation entry still to come, which does
+      // not belong in a list of played matches.
+      ...participation.filter((p) => p.played !== false).map(participationToPastMatch),
     ];
     if (effectiveTeam) {
       rows = rows.filter((r) => fixtureKey(r) === effectiveTeam);

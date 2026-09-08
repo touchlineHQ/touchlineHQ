@@ -306,7 +306,7 @@ export function ClubFixturesDisplay({ feed }: Props) {
                   {results.map((r) => (
                     <Table.Tr key={r.id}>
                       <Table.Td>
-                        <Text size="xs">{formatDate(r.date)}</Text>
+                        <Text size="xs">{formatDate(r.date)} · {r.time}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm" fw={r.homeAway === 'home' ? 700 : 400}>

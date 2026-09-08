@@ -1,41 +1,45 @@
 import {
   Box, Container, Stack, Title, Text, Paper, SimpleGrid, ThemeIcon, Anchor, Image, Group,
 } from '@mantine/core';
-import { IconBrandGoogle, IconBrandApple, IconBrandWindows, IconCalendarPlus } from '@tabler/icons-react';
+import {
+  IconBrandWhatsapp, IconDeviceMobileMessage, IconMail, IconTrophy,
+} from '@tabler/icons-react';
 import { Helmet } from 'react-helmet-async';
-import { TeamCalendarSearch } from '../components/TeamCalendarSearch';
+import { ClubRoundup } from '../components/ClubRoundup';
 
-const subscribeGuides = [
+const DESCRIPTION = "Build a weekly results roundup for your grassroots football club — ready to send over WhatsApp, post to your socials, or email round the parents. Free, updated automatically all season.";
+
+const sendGuides = [
   {
-    icon: <IconBrandGoogle size={24} />,
-    title: 'Google Calendar',
+    icon: <IconBrandWhatsapp size={24} />,
+    title: 'Team WhatsApp',
     steps: [
-      'Use the "Add to Google Calendar" button for one-click setup',
-      'Or open Google Calendar, click + next to "Other calendars"',
-      'Choose "From URL" and paste the feed link',
+      'Pick your club and check the week is right',
+      'Tap "WhatsApp" to open your chat list',
+      'Or "Copy message" and paste it wherever you like',
     ],
   },
   {
-    icon: <IconBrandApple size={24} />,
-    title: 'Apple Calendar',
+    icon: <IconDeviceMobileMessage size={24} />,
+    title: 'Club socials',
     steps: [
-      'Copy the feed URL using the "Copy feed URL" button',
-      'On Mac: File → New Calendar Subscription',
-      'On iPhone/iPad: Calendar → Accounts → Add Subscribed Calendar',
+      'Switch to the "Socials" tab for a shorter version',
+      'Watch the character count — it trims itself to fit X',
+      'Copy, then paste into your scheduling tool',
     ],
   },
   {
-    icon: <IconBrandWindows size={24} />,
-    title: 'Outlook',
+    icon: <IconMail size={24} />,
+    title: 'Parents\' email',
     steps: [
-      'Copy the feed URL using the "Copy feed URL" button',
-      'Go to Calendar → Add calendar',
-      'Choose "Subscribe from web" and paste the link',
+      'Switch to the "Email" tab for a subject and plain-text body',
+      'Turn off emoji if your mailing list prefers plain text',
+      'Tap "Email" to open it in your mail app',
     ],
   },
 ];
 
-export const CalendarPage = () => {
+export const RoundupPage = () => {
   return (
     <Stack
       flex={1}
@@ -46,19 +50,20 @@ export const CalendarPage = () => {
       }}
     >
       <Helmet>
-        <title>Team Fixture Calendars — touchlineHQ</title>
-        <meta name="description" content="Subscribe to your grassroots football team's fixture calendar. Free live feeds for Google Calendar, Apple Calendar, and Outlook — updated automatically all season." />
-        <link rel="canonical" href="https://touchlinehq.co.uk/calendar" />
+        <title>Weekly Results Roundup — touchlineHQ</title>
+        <meta name="description" content={DESCRIPTION} />
+        <link rel="canonical" href="https://touchlinehq.co.uk/roundup" />
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="Team Fixture Calendars — touchlineHQ" />
-        <meta property="og:description" content="Subscribe to your grassroots football team's fixture calendar. Free live feeds for Google Calendar, Apple Calendar, and Outlook — updated automatically all season." />
-        <meta property="og:url" content="https://touchlinehq.co.uk/calendar" />
+        <meta property="og:title" content="Weekly Results Roundup — touchlineHQ" />
+        <meta property="og:description" content={DESCRIPTION} />
+        <meta property="og:url" content="https://touchlinehq.co.uk/roundup" />
         <meta property="og:image" content="https://touchlinehq.co.uk/images/logo.png" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Team Fixture Calendars — touchlineHQ" />
-        <meta name="twitter:description" content="Subscribe to your grassroots football team's fixture calendar. Free live feeds for Google Calendar, Apple Calendar, and Outlook — updated automatically all season." />
+        <meta name="twitter:title" content="Weekly Results Roundup — touchlineHQ" />
+        <meta name="twitter:description" content={DESCRIPTION} />
         <meta name="twitter:image" content="https://touchlinehq.co.uk/images/logo.png" />
       </Helmet>
+
       <Box py="xl">
         <Container size="lg">
           <Stack gap="xl">
@@ -68,12 +73,14 @@ export const CalendarPage = () => {
                   <Image src={`${import.meta.env.BASE_URL}images/logo.png`} alt="TouchlineHQ logo" h={50} w="auto" />
                 </Group>
                 <Stack gap={2}>
-                  <Text size="sm" fw={600} c="green.8" tt="uppercase" ta="center">Fixture Calendars</Text>
-                  <Title order={1} ta="center">Your team's fixtures, in your calendar</Title>
+                  <Text size="sm" fw={600} c="green.8" tt="uppercase" ta="center">Weekly Roundup</Text>
+                  <Title order={1} ta="center">Your club's results, ready to send</Title>
                 </Stack>
               </Stack>
               <Text size="lg" c="dimmed" ta="center" maw={800} mx="auto">
-                Search for your team and subscribe to a live calendar feed. Every fixture is added automatically and kept up to date all season — free for every club and team.
+                Find your club and get every team's result from the weekend written up as a message —
+                for the team WhatsApp group, your club socials, or the parents' mailing list.
+                Free for every grassroots club.
               </Text>
             </Box>
           </Stack>
@@ -84,11 +91,11 @@ export const CalendarPage = () => {
         <Container size="lg" h="100%">
           <Stack gap="xl">
             <Paper p="xl" radius="lg" withBorder style={{ borderColor: 'var(--mantine-color-gray-2)', background: 'white' }}>
-              <TeamCalendarSearch />
+              <ClubRoundup />
             </Paper>
 
             <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
-              {subscribeGuides.map(guide => (
+              {sendGuides.map(guide => (
                 <Paper key={guide.title} p="lg" radius="lg" withBorder style={{ borderColor: 'var(--mantine-color-gray-2)', background: 'white' }} h="100%">
                   <Stack gap="md">
                     <Group gap="sm">
@@ -111,13 +118,13 @@ export const CalendarPage = () => {
             </SimpleGrid>
 
             <Text component="div" size="sm" c="dimmed" ta="center">
-              Data sourced from FA Full-Time via{' '}
+              Results sourced from FA Full-Time via{' '}
               <Anchor href="https://github.com/touchlineHQ/fulltimeFeeds" target="_blank" rel="noopener noreferrer">
                 fulltimeFeeds
               </Anchor>
-              . Feeds refresh automatically — subscribe once and your calendar stays current all season.
+              . Feeds refresh daily, so each week's roundup is ready the morning after the games.
               <Group gap={6} justify="center" mt={4}>
-                <IconCalendarPlus size={14} color="var(--mantine-color-green-6)" />
+                <IconTrophy size={14} color="var(--mantine-color-green-6)" />
                 <Text size="sm" c="dimmed">Free forever for grassroots clubs</Text>
               </Group>
             </Text>

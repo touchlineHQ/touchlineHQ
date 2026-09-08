@@ -9,15 +9,9 @@ import {
   OPPONENT_LABEL, RESTRICTED_RESULTS_NOTICE, SCORE_WITHHELD_LABEL,
   isRowRestricted, restrictedSides,
 } from '../utils/compliance';
+import { getOutcome } from '../utils/roundup';
 
 const FORM_GAMES = 5;
-
-function getOutcome(r: LiveResult): 'W' | 'D' | 'L' | null {
-  if (r.goals_for === null || r.goals_against === null) return null;
-  if (r.goals_for > r.goals_against) return 'W';
-  if (r.goals_for === r.goals_against) return 'D';
-  return 'L';
-}
 
 const outcomeColor: Record<'W' | 'D' | 'L', string> = { W: 'green', D: 'yellow', L: 'red' };
 
@@ -179,7 +173,9 @@ export function ClubFixturesDisplay({ feed }: Props) {
   const results = useMemo(() => {
     let rows: PastMatch[] = [
       ...feed.results.map(resultToPastMatch),
-      ...participation.map(participationToPastMatch),
+      // `played: false` marks a participation entry still to come, which does
+      // not belong in a list of played matches.
+      ...participation.filter((p) => p.played !== false).map(participationToPastMatch),
     ];
     if (effectiveTeam) {
       rows = rows.filter((r) => fixtureKey(r) === effectiveTeam);

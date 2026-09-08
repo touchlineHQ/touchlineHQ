@@ -1,4 +1,5 @@
-import type { ClubFeed, LiveResult } from '../types';
+import type { ClubFeed, LiveResult, ParticipationEntry } from '../types';
+import { isRowRestricted } from './compliance';
 
 // Feed dates are plain "YYYY-MM-DD" strings. Every window/selection decision below
 // works on those strings or on UTC-parsed parts, never on a local-time Date — a
@@ -89,11 +90,13 @@ export interface RoundupDerbyLine {
 /**
  * Why a played match has no score.
  *
- * `friendly`  — the competition is a friendly, so nobody records a result.
- * `age-group` — the league withholds scores at this age (see below).
- * `withheld`  — redacted for a reason the feed doesn't explain.
+ * `friendly` — the competition is a friendly, so nobody records a result.
+ * `withheld` — redacted for a reason the feed doesn't explain.
+ *
+ * U11-and-below matches never reach here: they become participation lines
+ * before a reason is asked for.
  */
-export type UnscoredReason = 'friendly' | 'age-group' | 'withheld';
+export type UnscoredReason = 'friendly' | 'withheld';
 
 /**
  * A match that was played but carries no score.
@@ -115,8 +118,28 @@ export interface RoundupUnscoredLine {
   reason: UnscoredReason;
 }
 
+/**
+ * A U11-and-below match. The FA prohibits publishing results at these ages, and
+ * the league's guidance extends that to the opposition and the venue, so this
+ * line carries none of them — it says only that the team played, and when.
+ */
+export interface RoundupParticipationLine {
+  kind: 'participation';
+  id: string;
+  date: string;
+  time: string;
+  team: string;
+  homeAway: 'home' | 'away';
+  division: string;
+  ageGroup: string | null;
+}
+
 /** Every match the club played in the week, scored or not. */
-export type RoundupMatch = RoundupResultLine | RoundupDerbyLine | RoundupUnscoredLine;
+export type RoundupMatch =
+  | RoundupResultLine
+  | RoundupDerbyLine
+  | RoundupUnscoredLine
+  | RoundupParticipationLine;
 
 export interface RoundupSummary {
   played: number;
@@ -148,12 +171,29 @@ export interface FormatOptions {
 
 export function scoredMatches(roundup: Roundup): (RoundupResultLine | RoundupDerbyLine)[] {
   return roundup.matches.filter(
-    (m): m is RoundupResultLine | RoundupDerbyLine => m.kind !== 'unscored',
+    (m): m is RoundupResultLine | RoundupDerbyLine =>
+      m.kind === 'result' || m.kind === 'derby',
   );
 }
 
 export function unscoredMatches(roundup: Roundup): RoundupUnscoredLine[] {
   return roundup.matches.filter((m): m is RoundupUnscoredLine => m.kind === 'unscored');
+}
+
+export function participationMatches(roundup: Roundup): RoundupParticipationLine[] {
+  return roundup.matches.filter(
+    (m): m is RoundupParticipationLine => m.kind === 'participation',
+  );
+}
+
+/**
+ * The roundup with participation games kept or dropped. The summary is rebuilt
+ * either way so the record can never describe matches the message doesn't show.
+ */
+export function withParticipation(roundup: Roundup, include: boolean): Roundup {
+  if (include) return roundup;
+  const matches = roundup.matches.filter(m => m.kind !== 'participation');
+  return { ...roundup, matches, summary: summarise(matches) };
 }
 
 // ---------------------------------------------------------------------------
@@ -255,38 +295,13 @@ export function stripClubPrefix(teamName: string, clubName: string): string {
 }
 
 const FRIENDLY_RE = /\bfriendl(?:y|ies)\b/i;
-const AGE_GROUP_RE = /\bU(\d{1,2})\b/i;
 
 /**
- * Under FA youth rules, football below U12 is non-competitive: leagues publish
- * the fixtures but not the scores, and keep no league table.
+ * Explain a withheld score for a match old enough to have one. Age is not
+ * consulted: U11 and below is settled by compliance before this is reached.
  */
-const YOUNGEST_COMPETITIVE_AGE = 12;
-
-/** The age group named in any of these labels, e.g. "U10 Division 1" -> 10. */
-export function ageGroupOf(...labels: (string | undefined)[]): number | null {
-  let youngest: number | null = null;
-  for (const label of labels) {
-    const match = label?.match(AGE_GROUP_RE);
-    if (!match) continue;
-    const age = Number(match[1]);
-    if (age >= 6 && age <= 21 && (youngest === null || age < youngest)) youngest = age;
-  }
-  return youngest;
-}
-
-/**
- * Explain a withheld score. The competition name is an explicit signal so it
- * wins; the age group is inferred from the division and team names, and is only
- * consulted when nothing says "friendly".
- */
-export function unscoredReason(
-  row: Pick<LiveResult, 'division' | 'team' | 'opponent'>,
-): UnscoredReason {
-  if (FRIENDLY_RE.test(row.division)) return 'friendly';
-  const age = ageGroupOf(row.division, row.team, row.opponent);
-  if (age !== null && age < YOUNGEST_COMPETITIVE_AGE) return 'age-group';
-  return 'withheld';
+export function unscoredReason(row: Pick<LiveResult, 'division'>): UnscoredReason {
+  return FRIENDLY_RE.test(row.division) ? 'friendly' : 'withheld';
 }
 
 /** Group rows sharing a fixture id — two rows means both sides are this club's. */
@@ -305,18 +320,22 @@ function byKickOff(a: { date: string; time: string }, b: { date: string; time: s
 }
 
 /**
- * Mondays of every week holding at least one result, newest first. Only weeks
- * that actually have results are offered — an empty week is never a useful pick.
+ * Mondays of every week the club played in, newest first. Participation games
+ * count: a club with only U11-and-below teams has no scored results at all, and
+ * without them it would be offered no weeks to look at.
  */
-export function weeksWithResults(feed: ClubFeed): string[] {
+export function weeksWithMatches(feed: ClubFeed): string[] {
   const weeks = new Set<string>();
   for (const result of feed.results) weeks.add(mondayOf(result.date));
+  for (const entry of feed.participation ?? []) {
+    if (entry.played !== false) weeks.add(mondayOf(entry.date));
+  }
   return [...weeks].sort((a, b) => b.localeCompare(a));
 }
 
-/** The week the roundup opens on: the most recent one holding results. */
+/** The week the roundup opens on: the most recent one the club played in. */
 export function defaultWeek(feed: ClubFeed): string | null {
-  return weeksWithResults(feed)[0] ?? null;
+  return weeksWithMatches(feed)[0] ?? null;
 }
 
 function isStale(generated: string): boolean {
@@ -329,9 +348,30 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
   const club = feed.club;
   const strip = (name: string) => stripClubPrefix(name, club);
   const matches: RoundupMatch[] = [];
+  // Ids already rendered as participation, so a redacted result row and the
+  // feed's own entry for the same match cannot both be listed.
+  const participationIds = new Set<string>();
 
   for (const group of groupById(feed.results.filter(r => inWeek(r.date, weekStart)))) {
     const [row] = group;
+
+    // U11 and below must carry no score, opposition or venue. The feed sends
+    // these as participation entries, so this only fires on a stale cached feed
+    // or one from a source we do not control. Redact rather than drop: the
+    // match still happened.
+    if (isRowRestricted(row)) {
+      participationIds.add(row.id);
+      matches.push(toParticipation({
+        id: row.id,
+        date: row.date,
+        time: row.time,
+        team: row.team,
+        home_away: row.home_away,
+        division: row.division,
+        age_group: null,
+      }, strip));
+      continue;
+    }
 
     if (group.length > 1) {
       // Both sides belong to this club. Use the neutral home/away scores rather
@@ -374,6 +414,15 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     });
   }
 
+  for (const entry of feed.participation ?? []) {
+    if (!inWeek(entry.date, weekStart)) continue;
+    // `played: false` marks one still to come; a roundup reports what happened.
+    if (entry.played === false) continue;
+    if (participationIds.has(entry.id)) continue;
+    participationIds.add(entry.id);
+    matches.push(toParticipation(entry, strip));
+  }
+
   matches.sort(byKickOff);
 
   return {
@@ -384,6 +433,23 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     summary: summarise(matches),
     generated: feed.generated,
     stale: isStale(feed.generated),
+  };
+}
+
+function toParticipation(
+  entry: Pick<ParticipationEntry, 'id' | 'date' | 'time' | 'team' | 'home_away' | 'division'>
+    & { age_group?: string | null },
+  strip: (name: string) => string,
+): RoundupParticipationLine {
+  return {
+    kind: 'participation',
+    id: entry.id,
+    date: entry.date,
+    time: entry.time,
+    team: strip(entry.team),
+    homeAway: entry.home_away,
+    division: entry.division,
+    ageGroup: entry.age_group ?? null,
   };
 }
 
@@ -446,8 +512,8 @@ function marker(match: RoundupMatch, emoji: boolean): string {
   if (match.kind === 'result') {
     return emoji ? `${OUTCOME_EMOJI[match.outcome]} ` : `(${match.outcome}) `;
   }
-  // A derby and an unscored match both read unambiguously without emoji — the
-  // derby from its neutral scoreline, the unscored one from having no score.
+  // A derby and a scoreless match both read unambiguously without emoji — the
+  // derby from its neutral scoreline, the others from having no score at all.
   if (match.kind === 'derby') return emoji ? `${DERBY_EMOJI} ` : '';
   return emoji ? `${UNSCORED_EMOJI} ` : '';
 }
@@ -459,6 +525,11 @@ function matchBody(match: RoundupMatch): string {
   }
   if (match.kind === 'derby') {
     return `${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`;
+  }
+  if (match.kind === 'participation') {
+    // Naming the opposition or venue is exactly what the guidance forbids, so
+    // the line reports only that this team played, and where they travelled.
+    return `${match.team} played ${match.homeAway === 'home' ? 'at home' : 'away'}`;
   }
   const suffix = match.reason === 'friendly' ? ' (friendly)' : '';
   return `${match.team} vs ${match.opponent}${suffix}`;
@@ -473,12 +544,14 @@ export function matchLine(match: RoundupMatch, emoji: boolean): string {
  * One line explaining the blue dots, built only from the reasons actually
  * present so it never claims a cause this week's matches don't have.
  */
-function unscoredNote(lines: RoundupUnscoredLine[], emoji: boolean): string | null {
-  if (lines.length === 0) return null;
-  const reasons = new Set(lines.map(line => line.reason));
+function unscoredNote(roundup: Roundup, emoji: boolean): string | null {
+  const unscored = unscoredMatches(roundup);
+  const participation = participationMatches(roundup);
+  if (unscored.length === 0 && participation.length === 0) return null;
+
   const causes: string[] = [];
-  if (reasons.has('age-group')) causes.push('U11 and below');
-  if (reasons.has('friendly')) causes.push('friendlies');
+  if (participation.length > 0) causes.push('U11 and below');
+  if (unscored.some(line => line.reason === 'friendly')) causes.push('friendlies');
   const why = causes.length > 0 ? ` — ${causes.join(', ')}` : '';
   return `${emoji ? `${UNSCORED_EMOJI} ` : ''}No score published${why}`;
 }
@@ -506,7 +579,7 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
     blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
   }
 
-  const note = unscoredNote(unscoredMatches(roundup), emoji);
+  const note = unscoredNote(roundup, emoji);
   if (note) blocks.push(note);
 
   if (includeLink && link) blocks.push(`Full results:\n${link}`);
@@ -597,7 +670,7 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
     );
   }
 
-  const note = unscoredNote(unscoredMatches(roundup), emoji);
+  const note = unscoredNote(roundup, emoji);
   if (note) blocks.push(note);
 
   if (includeLink && link) blocks.push(`Full results: ${link}`);

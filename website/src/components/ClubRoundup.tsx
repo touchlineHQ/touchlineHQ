@@ -12,11 +12,12 @@ import { loadClubIndex, loadClubFeed } from '../data';
 import type { FeedClubEntry } from '../data';
 import type { ClubFeed } from '../types';
 import {
-  buildRoundup, defaultWeek, weeksWithResults, addDays, formatDayRange, formatKickOffLabel,
+  buildRoundup, defaultWeek, weeksWithMatches, addDays, formatDayRange, formatKickOffLabel,
   formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, unscoredMatches,
-  SOCIAL_LIMIT,
+  participationMatches, withParticipation, SOCIAL_LIMIT,
 } from '../utils/roundup';
 import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
+import { RESTRICTED_RESULTS_NOTICE } from '../utils/compliance';
 import { copyTextToClipboard } from '../utils/clipboard';
 
 type Format = 'whatsapp' | 'social' | 'email';
@@ -35,6 +36,9 @@ function MatchBadge({ match }: { match: RoundupMatch }) {
   if (match.kind === 'derby') {
     return <Badge color="gray" variant="filled" size="xs" radius="sm">Derby</Badge>;
   }
+  if (match.kind === 'participation') {
+    return <Badge color="blue" variant="light" size="xs" radius="sm">Participation</Badge>;
+  }
   return match.reason === 'friendly'
     ? <Badge color="blue" variant="filled" size="xs" radius="sm">Friendly</Badge>
     : <Badge color="blue" variant="light" size="xs" radius="sm">No score</Badge>;
@@ -46,6 +50,10 @@ function matchText(match: RoundupMatch): string {
   }
   if (match.kind === 'derby') {
     return `${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`;
+  }
+  // No opposition or venue for U11 and below — see utils/compliance.
+  if (match.kind === 'participation') {
+    return `${match.team} played ${match.homeAway === 'home' ? 'at home' : 'away'}`;
   }
   return `${match.team} vs ${match.opponent}`;
 }
@@ -60,7 +68,7 @@ function MatchRow({ match }: { match: RoundupMatch }) {
         </Group>
         <Text size="xs" c="dimmed">{formatKickOffLabel(match.date, match.time)}</Text>
       </Group>
-      <Text fw={700} size="sm" ta="center" c={match.kind === 'unscored' ? 'dimmed' : undefined}>
+      <Text fw={700} size="sm" ta="center" c={match.kind === 'result' || match.kind === 'derby' ? undefined : 'dimmed'}>
         {matchText(match)}
       </Text>
     </Paper>
@@ -69,18 +77,9 @@ function MatchRow({ match }: { match: RoundupMatch }) {
 
 /** Say why some matches have no score, without claiming more than the feed supports. */
 function unscoredExplanation(lines: RoundupUnscoredLine[]): string {
-  const hasFriendly = lines.some(l => l.reason === 'friendly');
-  const hasAgeGroup = lines.some(l => l.reason === 'age-group');
-  if (hasAgeGroup && hasFriendly) {
-    return 'Some matches have no score: friendlies carry no result, and below U12 the league publishes fixtures but not scores. They were played — they just stay out of the record.';
-  }
-  if (hasAgeGroup) {
-    return 'Below U12 the league publishes fixtures but not scores. Those matches were played — they just stay out of the record.';
-  }
-  if (hasFriendly) {
-    return 'Friendlies carry no recorded result, so they stay out of the record.';
-  }
-  return 'The league withholds the score for some of these matches, so they stay out of the record.';
+  return lines.some(l => l.reason === 'friendly')
+    ? 'Friendlies carry no recorded result, so they stay out of the record.'
+    : 'The league withholds the score for some of these matches, so they stay out of the record.';
 }
 
 function SummaryChips({ roundup }: { roundup: Roundup }) {
@@ -121,6 +120,7 @@ export function ClubRoundup() {
 
   const [format, setFormat] = useState<Format>('whatsapp');
   const [includeLink, setIncludeLink] = useState(true);
+  const [includeParticipation, setIncludeParticipation] = useState(true);
   const [emoji, setEmoji] = useState(true);
 
   const [copied, setCopied] = useState(false);
@@ -172,7 +172,7 @@ export function ClubRoundup() {
         } else {
           setFeed(loaded);
           const weekParam = searchParams.get('week');
-          const available = weeksWithResults(loaded);
+          const available = weeksWithMatches(loaded);
           setWeek(weekParam && available.includes(weekParam) ? weekParam : defaultWeek(loaded));
         }
         setLoadingFeed(false);
@@ -206,18 +206,35 @@ export function ClubRoundup() {
 
   const weekOptions = useMemo(() => {
     if (!feed) return [];
-    return weeksWithResults(feed).map(start => ({
+    return weeksWithMatches(feed).map(start => ({
       value: start,
       label: formatDayRange(start, addDays(start, 6)),
     }));
   }, [feed]);
 
-  const roundup = useMemo(
+  const fullRoundup = useMemo(
     () => (feed && week ? buildRoundup(feed, week) : null),
     [feed, week],
   );
 
+  /** How many participation games the toggle governs, shown or not. */
+  const participationCount = useMemo(
+    () => (fullRoundup ? participationMatches(fullRoundup).length : 0),
+    [fullRoundup],
+  );
+
+  // Everything below reads this, so hiding participation games takes them out
+  // of the list, the message and the record together.
+  const roundup = useMemo(
+    () => (fullRoundup ? withParticipation(fullRoundup, includeParticipation) : null),
+    [fullRoundup, includeParticipation],
+  );
+
   const unscored = useMemo(() => (roundup ? unscoredMatches(roundup) : []), [roundup]);
+  const hasParticipation = useMemo(
+    () => (roundup ? participationMatches(roundup).length > 0 : false),
+    [roundup],
+  );
 
   // The deep link is this page's own URL with the club and week pinned, so a
   // recipient who taps it lands on exactly the roundup that was sent.
@@ -251,7 +268,7 @@ export function ClubRoundup() {
   useEffect(() => {
     setCopied(false);
     setCopyFailed(false);
-  }, [format, includeLink, emoji, week]);
+  }, [format, includeLink, emoji, week, includeParticipation]);
 
   const copy = async () => {
     if (!message) return;
@@ -347,8 +364,17 @@ export function ClubRoundup() {
             ) : (
               roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
             )}
+            {hasParticipation && (
+              <Text size="xs" c="dimmed">{RESTRICTED_RESULTS_NOTICE}</Text>
+            )}
             {unscored.length > 0 && (
               <Text size="xs" c="dimmed">{unscoredExplanation(unscored)}</Text>
+            )}
+            {!includeParticipation && participationCount > 0 && (
+              <Text size="xs" c="dimmed">
+                {participationCount} participation game{participationCount === 1 ? '' : 's'} hidden
+                (Under-11 and below).
+              </Text>
             )}
           </Stack>
 
@@ -373,6 +399,14 @@ export function ClubRoundup() {
                 onChange={e => setIncludeLink(e.currentTarget.checked)}
                 size="sm"
               />
+              {participationCount > 0 && (
+                <Switch
+                  label={`Participation games (${participationCount})`}
+                  checked={includeParticipation}
+                  onChange={e => setIncludeParticipation(e.currentTarget.checked)}
+                  size="sm"
+                />
+              )}
               <Switch
                 label="Emoji"
                 checked={emoji}

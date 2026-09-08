@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import type { ClubFeed, LiveFixture, LiveResult } from '../types';
+import type { ClubFeed, LiveFixture, LiveResult, ParticipationEntry } from '../types';
 import {
   addDays, mondayOf, formatDayShort, formatDayRange, stripClubPrefix, getOutcome,
-  weeksWithResults, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
-  formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, ageGroupOf, unscoredReason,
-  formatKickOff, formatKickOffLabel, unscoredMatches, xWeightedLength,
+  weeksWithMatches, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
+  formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, unscoredReason,
+  formatKickOff, formatKickOffLabel, unscoredMatches, participationMatches,
+  withParticipation, xWeightedLength,
 } from './roundup';
 
 const CLUB = 'East Leake';
@@ -12,13 +13,13 @@ const WEEK = '2026-08-31'; // Mon 31 Aug – Sun 6 Sep 2026
 
 function makeResult(over: Partial<LiveResult> & Pick<LiveResult, 'id' | 'date' | 'team'>): LiveResult {
   const homeAway = over.home_away ?? 'home';
-  const opponent = over.opponent ?? 'Opponent FC U10';
+  const opponent = over.opponent ?? 'Opponent FC U12';
   return {
     time: '10:00',
     home_team: homeAway === 'home' ? over.team : opponent,
     away_team: homeAway === 'home' ? opponent : over.team,
     venue: 'Lantern Lane',
-    division: 'U10 Division 1',
+    division: 'U12 Division 1',
     league: 'YEL East Midlands Sunday 25/26',
     home_away: homeAway,
     opponent,
@@ -46,6 +47,21 @@ function makeFixture(over: Partial<LiveFixture> & Pick<LiveFixture, 'id' | 'date
   } as LiveFixture;
 }
 
+function makeParticipation(
+  over: Partial<ParticipationEntry> & Pick<ParticipationEntry, 'id' | 'date' | 'team'>,
+): ParticipationEntry {
+  return {
+    time: '12:00',
+    league: 'YEL East Midlands Sunday 25/26',
+    home_away: 'home',
+    division: 'U9 Division 1',
+    age_group: 'U9',
+    played: true,
+    publication_restricted: true,
+    ...over,
+  };
+}
+
 /** A club week holding a win, a draw, a loss, an internal derby and an unscored match. */
 function makeFeed(): ClubFeed {
   return {
@@ -62,38 +78,32 @@ function makeFeed(): ClubFeed {
     ],
     results: [
       makeResult({
-        id: 'r1', date: '2026-09-06', time: '10:00', team: 'East Leake Blue U10',
-        opponent: 'Ruddington Village U10',
+        id: 'r1', date: '2026-09-06', time: '10:00', team: 'East Leake Blue U12',
+        opponent: 'Ruddington Village U12',
         home_score: 4, away_score: 1, goals_for: 4, goals_against: 1,
       }),
       makeResult({
-        id: 'r2', date: '2026-09-06', time: '10:30', team: 'East Leake Maroon U12',
-        opponent: 'Keyworth United U12', home_away: 'away',
+        id: 'r2', date: '2026-09-06', time: '10:30', team: 'East Leake Maroon U13',
+        opponent: 'Keyworth United U13', division: 'U13 Division 1', home_away: 'away',
         home_score: 2, away_score: 2, goals_for: 2, goals_against: 2,
       }),
       makeResult({
         id: 'r3', date: '2026-09-05', time: '11:00', team: 'East Leake Reds U14',
-        opponent: 'Radcliffe Olympic U14',
+        opponent: 'Radcliffe Olympic U14', division: 'U14 Division 1',
         home_score: 0, away_score: 3, goals_for: 0, goals_against: 3,
       }),
       // Same match, both perspectives — two teams from this club.
       makeResult({
-        id: 'derby', date: '2026-09-06', time: '09:00', team: 'East Leake Blue U10',
-        opponent: 'East Leake Greens U10',
-        home_team: 'East Leake Blue U10', away_team: 'East Leake Greens U10',
+        id: 'derby', date: '2026-09-06', time: '09:00', team: 'East Leake Blue U12',
+        opponent: 'East Leake Greens U12',
+        home_team: 'East Leake Blue U12', away_team: 'East Leake Greens U12',
         home_score: 2, away_score: 1, goals_for: 2, goals_against: 1,
       }),
       makeResult({
-        id: 'derby', date: '2026-09-06', time: '09:00', team: 'East Leake Greens U10',
-        opponent: 'East Leake Blue U10', home_away: 'away',
-        home_team: 'East Leake Blue U10', away_team: 'East Leake Greens U10',
+        id: 'derby', date: '2026-09-06', time: '09:00', team: 'East Leake Greens U12',
+        opponent: 'East Leake Blue U12', home_away: 'away',
+        home_team: 'East Leake Blue U12', away_team: 'East Leake Greens U12',
         home_score: 2, away_score: 1, goals_for: 1, goals_against: 2,
-      }),
-      // Played, but below U12 the league prints "X - X" instead of a score.
-      makeResult({
-        id: 'young', date: '2026-09-06', time: '12:00', team: 'East Leake Whites U9',
-        opponent: 'Sutton Bonington U9', division: 'U9 Sun Spring Div 3 Red',
-        home_score: null, away_score: null, goals_for: null, goals_against: null,
       }),
       // A friendly — no result recorded regardless of age group.
       makeResult({
@@ -102,7 +112,21 @@ function makeFeed(): ClubFeed {
         home_score: null, away_score: null, goals_for: null, goals_against: null,
       }),
       // Previous week — must not appear.
-      makeResult({ id: 'old', date: '2026-08-30', team: 'East Leake Blue U10' }),
+      makeResult({ id: 'old', date: '2026-08-30', team: 'East Leake Blue U12' }),
+    ],
+    participation: [
+      // U11 and below: the feed sends no opposition, venue or score.
+      makeParticipation({
+        id: 'young', date: '2026-09-06', time: '12:00',
+        team: 'East Leake Whites U9', division: 'U9 Sun Spring Div 3 Red', age_group: 'U9',
+      }),
+      // Still to come — a roundup reports what was played.
+      makeParticipation({
+        id: 'upcoming', date: '2026-09-06', time: '15:00',
+        team: 'East Leake Tigers U8', division: 'U8 Development', played: false,
+      }),
+      // Previous week — must not appear.
+      makeParticipation({ id: 'oldyoung', date: '2026-08-30', team: 'East Leake Whites U9' }),
     ],
   };
 }
@@ -185,43 +209,29 @@ describe('getOutcome', () => {
 });
 
 describe('why a score is missing', () => {
-  it('reads the age group off a division or team name', () => {
-    expect(ageGroupOf('U10 Sun Spring Div 3 Red')).toBe(10);
-    expect(ageGroupOf('Division 1', 'East Leake Blue U8')).toBe(8);
-    expect(ageGroupOf('Premier Division', 'Arnold Town')).toBeNull();
-  });
-
-  it('ignores numbers that are not age groups', () => {
-    expect(ageGroupOf('Division 3')).toBeNull();
-    expect(ageGroupOf('U99 Nonsense')).toBeNull();
-  });
-
   it('blames the competition when it says friendly', () => {
-    expect(unscoredReason({ division: 'U14 Friendly', team: 'A U14', opponent: 'B U14' }))
-      .toBe('friendly');
-    // Explicit beats inferred: a young friendly is still a friendly.
-    expect(unscoredReason({ division: 'U9 Friendlies', team: 'A U9', opponent: 'B U9' }))
-      .toBe('friendly');
-  });
-
-  it('blames the age group below U12, where scores are not published', () => {
-    expect(unscoredReason({ division: 'U9 Div 3', team: 'A U9', opponent: 'B U9' }))
-      .toBe('age-group');
-    expect(unscoredReason({ division: 'U11 Div 1', team: 'A U11', opponent: 'B U11' }))
-      .toBe('age-group');
+    expect(unscoredReason({ division: 'U14 Friendly' })).toBe('friendly');
+    expect(unscoredReason({ division: 'Senior Friendlies' })).toBe('friendly');
   });
 
   it('does not guess when the match is competitive and unexplained', () => {
-    expect(unscoredReason({ division: 'U14 Division 1', team: 'A U14', opponent: 'B U14' }))
-      .toBe('withheld');
-    expect(unscoredReason({ division: 'Premier Division', team: 'Arnold Town', opponent: 'Quorn' }))
-      .toBe('withheld');
+    expect(unscoredReason({ division: 'U14 Division 1' })).toBe('withheld');
+    expect(unscoredReason({ division: 'Premier Division' })).toBe('withheld');
   });
 });
 
 describe('week selection', () => {
-  it('offers only weeks that hold results, newest first', () => {
-    expect(weeksWithResults(makeFeed())).toEqual(['2026-08-31', '2026-08-24']);
+  it('offers only weeks the club played in, newest first', () => {
+    expect(weeksWithMatches(makeFeed())).toEqual(['2026-08-31', '2026-08-24']);
+  });
+
+  it('counts participation weeks, so an all-U8 club still gets a week', () => {
+    const young: ClubFeed = {
+      club: CLUB, generated: new Date().toISOString(), fixtures: [], results: [],
+      participation: [makeParticipation({ id: 'p', date: '2026-09-06', team: 'Quorn Lions U8' })],
+    };
+    expect(weeksWithMatches(young)).toEqual(['2026-08-31']);
+    expect(defaultWeek(young)).toBe('2026-08-31');
   });
 
   it('opens on the most recent week with results', () => {
@@ -248,13 +258,21 @@ describe('buildRoundup', () => {
       .toEqual(['r3', 'derby', 'r1', 'r2', 'young', 'friendly']);
   });
 
+  it('takes participation games from the feed, skipping unplayed and other weeks', () => {
+    const participation = participationMatches(roundup);
+    expect(participation.map(m => m.id)).toEqual(['young']);
+    expect(participation[0]).toMatchObject({
+      kind: 'participation', team: 'Whites U9', homeAway: 'home', ageGroup: 'U9',
+    });
+  });
+
   it('renders a club-v-club match once, neutrally', () => {
     const derby = roundup.matches.filter(m => m.id === 'derby');
     expect(derby).toHaveLength(1);
     expect(derby[0]).toMatchObject({
       kind: 'derby',
-      homeTeam: 'Blue U10',
-      awayTeam: 'Greens U10',
+      homeTeam: 'Blue U12',
+      awayTeam: 'Greens U12',
       homeScore: 2,
       awayScore: 1,
     });
@@ -262,11 +280,8 @@ describe('buildRoundup', () => {
 
   it('keeps unscored matches in the list but classifies why', () => {
     const unscored = unscoredMatches(roundup);
-    expect(unscored.map(m => m.id)).toEqual(['young', 'friendly']);
-    expect(unscored[0]).toMatchObject({
-      team: 'Whites U9', opponent: 'Sutton Bonington U9', reason: 'age-group',
-    });
-    expect(unscored[1]).toMatchObject({ team: 'Reds U14', reason: 'friendly' });
+    expect(unscored.map(m => m.id)).toEqual(['friendly']);
+    expect(unscored[0]).toMatchObject({ team: 'Reds U14', reason: 'friendly' });
   });
 
   it('counts only scored, non-derby matches, so P equals W+D+L', () => {
@@ -298,10 +313,10 @@ describe('message formats', () => {
     const text = formatWhatsApp(roundup, { link });
     expect(text).toContain('East Leake — Weekly Roundup');
     expect(text).toContain('Sat 5 – Sun 6 Sep');
-    expect(text).toContain('🟢 Sun 10am · Blue U10 4–1 Ruddington Village U10');
+    expect(text).toContain('🟢 Sun 10am · Blue U12 4–1 Ruddington Village U12');
     expect(text).toContain('🔴 Sat 11am · Reds U14 0–3 Radcliffe Olympic U14');
-    expect(text).toContain('⚪ Sun 9am · Blue U10 2–1 Greens U10');
-    expect(text).toContain('🔵 Sun 12pm · Whites U9 vs Sutton Bonington U9');
+    expect(text).toContain('⚪ Sun 9am · Blue U12 2–1 Greens U12');
+    expect(text).toContain('🔵 Sun 12pm · Whites U9 played at home');
     expect(text).toContain('🔵 Sun 1pm · Reds U14 vs Gotham Rangers U14 (friendly)');
     expect(text).toContain('P3 · W1 D1 L1 · GF 6 GA 6');
     expect(text).toContain(link);
@@ -310,7 +325,7 @@ describe('message formats', () => {
   it('drops emoji and the link on request', () => {
     const text = formatWhatsApp(roundup, { emoji: false, includeLink: false });
     expect(text).not.toMatch(/[⚽🟢🟡🔴🔵⚪📅📊]/u);
-    expect(text).toContain('(W) Sun 10am · Blue U10 4–1 Ruddington Village U10');
+    expect(text).toContain('(W) Sun 10am · Blue U12 4–1 Ruddington Village U12');
     expect(text).not.toContain('http');
   });
 
@@ -373,22 +388,58 @@ describe('message formats', () => {
       .toBeGreaterThan(lines.findIndex(l => l.includes('Ruddington Village')));
   });
 
+  it('never names the opposition or venue of a U11-and-below match', () => {
+    const text = formatWhatsApp(roundup, { link });
+    expect(text).toContain('Whites U9 played at home');
+    // The opposition for the U9 game must appear nowhere in the message.
+    expect(text).not.toContain('Sutton Bonington');
+    expect(text).not.toContain('Lantern Lane');
+    expect(formatEmailBody(roundup, { link })).not.toContain('Sutton Bonington');
+  });
+
+  it('drops participation games from the message when they are turned off', () => {
+    const without = withParticipation(roundup, false);
+    const text = formatWhatsApp(without, { link });
+    expect(text).not.toContain('Whites U9');
+    expect(text).not.toContain('U11 and below');
+    // The competitive results and the record are untouched.
+    expect(text).toContain('Blue U12 4–1 Ruddington Village U12');
+    expect(without.summary).toEqual(roundup.summary);
+    // The friendly is not a participation game and stays.
+    expect(text).toContain('Gotham Rangers U14 (friendly)');
+  });
+
+  it('treats a U11-and-below friendly as a participation game, not a friendly', () => {
+    const feed = makeFeed();
+    feed.results = [makeResult({
+      id: 'yf', date: '2026-09-06', time: '14:00', team: 'East Leake Blue U10',
+      opponent: 'Bunny FC U10', division: 'U10 Friendly',
+      home_score: null, away_score: null, goals_for: null, goals_against: null,
+    })];
+    feed.participation = [];
+    const built = buildRoundup(feed, WEEK);
+    expect(participationMatches(built).map(m => m.id)).toEqual(['yf']);
+    expect(unscoredMatches(built)).toHaveLength(0);
+    expect(formatWhatsApp(built)).not.toContain('Bunny FC');
+  });
+
   it('explains the blue dots from the reasons actually present', () => {
     expect(formatWhatsApp(roundup, { link }))
       .toContain('🔵 No score published — U11 and below, friendlies');
 
     const feed = makeFeed();
     feed.results = [makeResult({
-      id: 'fr', date: '2026-09-06', time: '14:00', team: 'East Leake Blue U10',
-      opponent: 'Bunny FC U10', division: 'U10 Friendly',
+      id: 'fr', date: '2026-09-06', time: '14:00', team: 'East Leake Reds U14',
+      opponent: 'Bunny FC U14', division: 'U14 Friendly',
       home_score: null, away_score: null, goals_for: null, goals_against: null,
     })];
+    feed.participation = [];
     const friendlyOnly = formatWhatsApp(buildRoundup(feed, WEEK));
     expect(friendlyOnly).toContain('🔵 No score published — friendlies');
     expect(friendlyOnly).not.toContain('U11 and below');
     // The week was played, so the message must not claim otherwise.
     expect(friendlyOnly).not.toContain('No results published for this week.');
-    expect(friendlyOnly).toContain('🔵 Sun 2pm · Blue U10 vs Bunny FC U10 (friendly)');
+    expect(friendlyOnly).toContain('🔵 Sun 2pm · Reds U14 vs Bunny FC U14 (friendly)');
   });
 
   it('says so plainly when a week has no results', () => {

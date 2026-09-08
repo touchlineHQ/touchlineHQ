@@ -80,8 +80,28 @@ export function safeVenue(row: MatchRow, venue: string | undefined): string {
   return isRowRestricted(row) ? '' : (venue ?? '');
 }
 
-/** Explains to a visitor why a young team's results are missing. */
+/**
+ * The two team names to show for a restricted match.
+ *
+ * The club's own team is kept — a club naming its own side is fine; it is the
+ * opposition that must not be identified. Without a known subject team there is
+ * nothing safe to keep, so both sides are anonymised.
+ */
+export function restrictedSides(
+  team: string | undefined,
+  homeAway: 'home' | 'away' | undefined,
+): { home: string; away: string } {
+  if (!team || !homeAway) return { home: OPPONENT_LABEL, away: OPPONENT_LABEL };
+  return homeAway === 'home'
+    ? { home: team, away: OPPONENT_LABEL }
+    : { home: OPPONENT_LABEL, away: team };
+}
+
+/** Shown in place of a score that must not be published. */
+export const SCORE_WITHHELD_LABEL = 'Not published';
+
+/** Explains to a visitor why a young team's matches carry no score. */
 export const RESTRICTED_RESULTS_NOTICE =
-  'Scores, results and league tables are not published for teams at Under-11 and below, ' +
-  'and opposition teams and venues are not named. This follows The FA’s youth ' +
-  'football guidance. Results are still submitted to the league privately.';
+  'Matches for teams at Under-11 and below are listed without a score, opposition ' +
+  'or venue, and no league table is shown. This follows The FA’s youth football ' +
+  'guidance. Results are still submitted to the league privately.';

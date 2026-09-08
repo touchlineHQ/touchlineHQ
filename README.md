@@ -65,16 +65,31 @@ wrangler.toml         # Cloudflare Pages config (build command + output dir)
 
 The FA prohibits publishing match results and league tables for teams playing at
 Under-11 and below, and the league's guidance extends that to naming the
-opposition or the venue in anything published online. For a team at U11 or
-below, the site therefore never renders:
+opposition or the venue in anything published online.
 
-- a score, a result, or any win/draw/loss or form summary
+**Matches are not hidden — the fields that cannot be published are stripped
+from them.** A U10 match still appears in the fixtures and results tabs, on its
+date, with its division and the club's own team name. What it does not carry is:
+
+- a score — the Score column reads *Not published*
 - the opposition's name — `Opposition` is shown instead
 - the venue
+- any win/draw/loss or form summary, which is a standings table in miniature
 
-Date, kick-off time, division and whether the match is home or away are still
-shown, and a short notice explains why the rest is missing. U12 to U18 and adult
-teams are displayed in full.
+That distinction matters: the season should still read as a complete record of
+who played and when. Making a young team's matches vanish tells a parent nothing
+and looks like a bug. `ParticipationEntry` rows in the feed exist for exactly
+this — they say a match was played, and nothing more. U12 to U18 and adult teams
+are displayed in full, scores included.
+
+| | Shown |
+|---|---|
+| Date, kick-off time, division, home or away | ✅ |
+| The club's own team name | ✅ |
+| Score | ❌ *Not published* |
+| Opposition name | ❌ `Opposition` |
+| Venue | ❌ |
+| Played/won/drawn/lost, form | ❌ open-age teams only |
 
 The [fulltimeFeeds](https://github.com/touchlineHQ/fulltimeFeeds) feeds this site
 consumes are already redacted at source, so in the normal case nothing

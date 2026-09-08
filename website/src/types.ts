@@ -91,12 +91,31 @@ export interface LiveResult extends LiveFixture {
   goals_against: number | null;
 }
 
+/**
+ * A U11-and-below match that was played. The score is withheld, but the fact of
+ * the match is not: the feed sends these so a young team's matches can still be
+ * listed rather than vanishing from the record.
+ */
+export interface ParticipationEntry {
+  id: string;
+  date: string;
+  time: string;
+  team: string;
+  league: string;
+  home_away: 'home' | 'away';
+  division: string;
+  age_group: string | null;
+  played: boolean;
+  publication_restricted?: boolean;
+}
+
 export interface ClubFeed {
   club: string;
   generated: string;
   compliance?: FeedCompliance;
   fixtures: LiveFixture[];
   results: LiveResult[];
+  participation?: ParticipationEntry[];
 }
 
 export interface LiveTeam {
@@ -112,6 +131,7 @@ export interface TeamFeed {
   compliance?: FeedCompliance;
   fixtures: Omit<LiveFixture, 'team' | 'home_away' | 'opponent'>[];
   results: Omit<LiveResult, 'team' | 'home_away' | 'opponent' | 'goals_for' | 'goals_against'>[];
+  participation?: ParticipationEntry[];
 }
 
 // Main app data

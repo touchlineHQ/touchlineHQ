@@ -471,18 +471,23 @@ function toUnscored(
 }
 
 /**
- * Played/W/D/L and goals over the scored, non-derby matches. Derbies are left
- * out on purpose: a club-v-club match is simultaneously a win and a loss for the
- * club, so counting it would make the record say something untrue. Unscored
- * matches have no result to count. Both exclusions keep played === W + D + L.
+ * Played counts every match in the roundup — participation games, friendlies
+ * and club-v-club derbies included. A club that turned out eight times played
+ * eight games, whether or not a score was ever recorded, and the point of the
+ * headline is to say how busy the weekend was.
+ *
+ * W/D/L and goals stay narrower, over matches with a result the club can claim
+ * as its own: a derby is simultaneously a win and a loss for the club, and the
+ * rest have no score at all. So played is deliberately not W + D + L, and the
+ * line spells out "Played" rather than the "P" of a league table, where the two
+ * would be the same number.
  */
 function summarise(matches: RoundupMatch[]): RoundupSummary {
   const summary: RoundupSummary = {
-    played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0,
+    played: matches.length, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0,
   };
   for (const match of matches) {
     if (match.kind !== 'result') continue;
-    summary.played += 1;
     if (match.outcome === 'W') summary.won += 1;
     else if (match.outcome === 'D') summary.drawn += 1;
     else summary.lost += 1;
@@ -490,6 +495,11 @@ function summarise(matches: RoundupMatch[]): RoundupSummary {
     summary.goalsAgainst += match.goalsAgainst;
   }
   return summary;
+}
+
+/** True when at least one match carried a result the club can claim. */
+export function hasRecord(summary: RoundupSummary): boolean {
+  return summary.won + summary.drawn + summary.lost > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -558,7 +568,10 @@ function unscoredNote(roundup: Roundup, emoji: boolean): string | null {
 
 function summaryLine(summary: RoundupSummary): string {
   const { played, won, drawn, lost, goalsFor, goalsAgainst } = summary;
-  return `P${played} · W${won} D${drawn} L${lost} · GF ${goalsFor} GA ${goalsAgainst}`;
+  // A week of nothing but participation games has no record to report; W0 D0 L0
+  // would read as three defeats-worth of nothing rather than as "not scored".
+  if (!hasRecord(summary)) return `Played ${played}`;
+  return `Played ${played} · W${won} D${drawn} L${lost} · GF ${goalsFor} GA ${goalsAgainst}`;
 }
 
 export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): string {
@@ -569,14 +582,14 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
     `${emoji ? '⚽ ' : ''}${roundup.club} — Weekly Roundup\n${matchRange(roundup)}`,
   );
 
+  if (roundup.summary.played > 0) {
+    blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
+  }
+
   if (roundup.matches.length > 0) {
     blocks.push(roundup.matches.map(match => matchLine(match, emoji)).join('\n'));
   } else {
     blocks.push('No results published for this week.');
-  }
-
-  if (roundup.summary.played > 0) {
-    blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
   }
 
   const note = unscoredNote(roundup, emoji);
@@ -609,7 +622,11 @@ export function formatSocial(roundup: Roundup, options: FormatOptions = {}): Soc
   const { summary } = roundup;
 
   const header = `${emoji ? '⚽ ' : ''}${roundup.club} weekend roundup`;
-  const record = summary.played > 0 ? `W${summary.won} D${summary.drawn} L${summary.lost}` : '';
+  const record = summary.played === 0
+    ? ''
+    : hasRecord(summary)
+      ? `Played ${summary.played} · W${summary.won} D${summary.drawn} L${summary.lost}`
+      : `Played ${summary.played}`;
   const tags = [clubHashtag(roundup.club), '#GrassrootsFootball'].filter(Boolean).join(' ');
   const tail = includeLink && link ? link : '';
 
@@ -656,18 +673,18 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
 
   blocks.push(`Results, ${matchRange(roundup)}`);
 
+  if (roundup.summary.played > 0) {
+    const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
+    blocks.push(hasRecord(roundup.summary)
+      ? `Played ${played}  Won ${won}  Drawn ${drawn}  Lost ${lost}\n`
+        + `Goals for ${goalsFor}, against ${goalsAgainst}`
+      : `Played ${played}`);
+  }
+
   if (roundup.matches.length > 0) {
     blocks.push(roundup.matches.map(match => `  ${matchLine(match, emoji)}`).join('\n'));
   } else {
     blocks.push('  No results published for this week.');
-  }
-
-  if (roundup.summary.played > 0) {
-    const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
-    blocks.push(
-      `Played ${played}  Won ${won}  Drawn ${drawn}  Lost ${lost}\n` +
-      `Goals for ${goalsFor}, against ${goalsAgainst}`,
-    );
   }
 
   const note = unscoredNote(roundup, emoji);

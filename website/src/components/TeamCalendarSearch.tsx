@@ -5,7 +5,7 @@ import {
 } from '@mantine/core';
 import {
   IconAlertCircle, IconSearch, IconDownload, IconBrandGoogle, IconCopy, IconCheck, IconCalendarPlus, IconShare,
-  IconBrandWhatsapp, IconBrandTwitter, IconBrandFacebook, IconMail, IconLink,
+  IconBrandWhatsapp, IconBrandTwitter, IconBrandFacebook, IconMail, IconLink, IconShieldLock,
 } from '@tabler/icons-react';
 import {
   loadAllFeedTeams, loadTeamFeed, teamCalendarUrl, googleCalendarSubscribeUrl,
@@ -13,6 +13,9 @@ import {
 import type { FeedTeamEntry } from '../data';
 import type { TeamFeed } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
+import {
+  OPPONENT_LABEL, RESTRICTED_RESULTS_NOTICE, isRestricted, isRowRestricted,
+} from '../utils/compliance';
 
 const optionValue = (t: FeedTeamEntry) => `${t.league}\0${t.slug}`;
 
@@ -117,6 +120,13 @@ export function TeamCalendarSearch() {
     return [...feed.fixtures]
       .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
   }, [feed]);
+
+  // At U11 and below the opposition and venue are not published. The feed
+  // already redacts them; this keeps a stale cached feed from slipping past.
+  const teamRestricted = useMemo(
+    () => isRestricted(selectedEntry?.name, feed?.team),
+    [selectedEntry, feed]
+  );
 
   const options = useMemo(
     () => teams.map(t => ({
@@ -311,21 +321,36 @@ export function TeamCalendarSearch() {
               <IconCalendarPlus size={16} color="var(--mantine-color-green-6)" />
               <Text fw={600} size="sm">Next fixtures</Text>
             </Group>
+            {(teamRestricted || nextFixtures.some(isRowRestricted)) && (
+              <Alert icon={<IconShieldLock size={16} />} color="blue" title="Under-11 and below">
+                {RESTRICTED_RESULTS_NOTICE}
+              </Alert>
+            )}
             {nextFixtures.length === 0 ? (
               <Text size="sm" c="dimmed">No upcoming fixtures published yet.</Text>
             ) : (
-              nextFixtures.map(f => (
-                <Paper key={f.id} p="sm" withBorder radius="md">
-                  <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
-                    <Badge variant="light" size="xs">{f.division}</Badge>
-                    <Text size="xs" c="dimmed">{formatDate(f.date)} · {f.time}</Text>
-                  </Group>
-                  <Text fw={700} size="sm" ta="center">
-                    {f.home_team} vs {f.away_team}
-                  </Text>
-                  <Text size="xs" c="dimmed" ta="center">{f.venue}</Text>
-                </Paper>
-              ))
+              nextFixtures.map(f => {
+                const restricted = teamRestricted || isRowRestricted(f);
+                const isHome = f.home_team === (feed?.team ?? selectedEntry.name);
+                return (
+                  <Paper key={f.id} p="sm" withBorder radius="md">
+                    <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
+                      <Badge variant="light" size="xs">{f.division}</Badge>
+                      <Text size="xs" c="dimmed">{formatDate(f.date)} · {f.time}</Text>
+                    </Group>
+                    <Text fw={700} size="sm" ta="center">
+                      {restricted
+                        ? `${selectedEntry.name} vs ${OPPONENT_LABEL}`
+                        : `${f.home_team} vs ${f.away_team}`}
+                    </Text>
+                    <Text size="xs" c="dimmed" ta="center">
+                      {restricted
+                        ? `${isHome ? 'Home' : 'Away'} · Opposition and venue not published`
+                        : f.venue}
+                    </Text>
+                  </Paper>
+                );
+              })
             )}
           </Stack>
         </Stack>

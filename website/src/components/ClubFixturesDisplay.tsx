@@ -3,15 +3,14 @@ import {
   Title, Text, Stack, Paper, Badge, Group, Select, Tabs,
   Table, Alert,
 } from '@mantine/core';
-import { IconCalendar, IconTrophy, IconAlertCircle } from '@tabler/icons-react';
-import type { ClubFeed, LiveResult, LiveFixture } from '../types';
+import { IconCalendar, IconTrophy, IconAlertCircle, IconShieldLock } from '@tabler/icons-react';
+import type { ClubFeed, LiveResult, LiveFixture, ParticipationEntry } from '../types';
+import {
+  OPPONENT_LABEL, RESTRICTED_RESULTS_NOTICE, SCORE_WITHHELD_LABEL,
+  isRowRestricted, restrictedSides,
+} from '../utils/compliance';
 
 const FORM_GAMES = 5;
-
-function isYoungAgeGroup(teamName: string): boolean {
-  const youngPattern = /\b(U[78])(s?)\b/i;
-  return youngPattern.test(teamName);
-}
 
 function getOutcome(r: LiveResult): 'W' | 'D' | 'L' | null {
   if (r.goals_for === null || r.goals_against === null) return null;
@@ -60,6 +59,74 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/**
+ * One row of the results table.
+ *
+ * A U11-and-below match is not dropped — it appears with the fields that cannot
+ * be published stripped out, so the season still reads as a complete record of
+ * who played and when.
+ */
+interface PastMatch {
+  id: string;
+  date: string;
+  time: string;
+  homeTeam: string;
+  awayTeam: string;
+  division: string;
+  /** null when the score must not be published. */
+  score: string | null;
+  restricted: boolean;
+  team?: string;
+  league?: string;
+  homeAway?: 'home' | 'away';
+}
+
+function resultToPastMatch(r: LiveResult): PastMatch {
+  const base = {
+    id: r.id,
+    date: r.date,
+    time: r.time,
+    division: r.division,
+    team: r.team,
+    league: r.league,
+    homeAway: r.home_away,
+  };
+
+  // The feed sends restricted matches as participation entries, so this branch
+  // only fires on a stale cached feed or one from a source we do not control.
+  // Redact rather than drop: the match still happened.
+  if (isRowRestricted(r)) {
+    const homeAway = r.home_away ?? (r.home_team === r.team ? 'home' : 'away');
+    const sides = restrictedSides(r.team, homeAway);
+    return { ...base, homeAway, homeTeam: sides.home, awayTeam: sides.away, score: null, restricted: true };
+  }
+
+  return {
+    ...base,
+    homeTeam: r.home_team,
+    awayTeam: r.away_team,
+    score: `${r.home_score ?? 'X'} - ${r.away_score ?? 'X'}`,
+    restricted: false,
+  };
+}
+
+function participationToPastMatch(p: ParticipationEntry): PastMatch {
+  const sides = restrictedSides(p.team, p.home_away);
+  return {
+    id: p.id,
+    date: p.date,
+    time: p.time,
+    division: p.division,
+    team: p.team,
+    league: p.league,
+    homeAway: p.home_away,
+    homeTeam: sides.home,
+    awayTeam: sides.away,
+    score: null,
+    restricted: true,
+  };
+}
+
 interface Props {
   feed: ClubFeed;
 }
@@ -68,12 +135,15 @@ export function ClubFixturesDisplay({ feed }: Props) {
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
 
   // Use composite key (team + league) to differentiate same-named teams across leagues
-  const fixtureKey = (f: LiveFixture | LiveResult) => `${f.team}\0${f.league}`;
+  const fixtureKey = (f: { team?: string; league?: string }) => `${f.team}\0${f.league}`;
+
+  const participation = useMemo(() => feed.participation ?? [], [feed]);
 
   const teamOptions = useMemo(() => {
     const keys = new Set<string>();
     for (const f of feed.fixtures) if (f.team) keys.add(fixtureKey(f));
     for (const r of feed.results) if (r.team) keys.add(fixtureKey(r));
+    for (const p of participation) if (p.team) keys.add(fixtureKey(p));
 
     return Array.from(keys)
       .map(k => {
@@ -84,14 +154,13 @@ export function ClubFixturesDisplay({ feed }: Props) {
         return { value: k, label };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [feed]);
+  }, [feed, participation]);
 
   // Reset team dropdown when it's no longer in the available list
   const effectiveTeam = selectedTeam && teamOptions.some(o => o.value === selectedTeam) ? selectedTeam : null;
-  const isYoungSelected = effectiveTeam ? isYoungAgeGroup(effectiveTeam.split('\0')[0]) : false;
 
   const fixtures = useMemo(() => {
-    let list = feed.fixtures;
+    let list: LiveFixture[] = feed.fixtures;
     if (effectiveTeam) {
       list = list.filter((f) => fixtureKey(f) === effectiveTeam);
     } else {
@@ -105,20 +174,38 @@ export function ClubFixturesDisplay({ feed }: Props) {
     return [...list].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
   }, [feed, effectiveTeam]);
 
+  // Played matches, both lanes in one list: open-age results with their score,
+  // and U11-and-below matches with the score, opposition and venue stripped.
   const results = useMemo(() => {
-    let list = feed.results;
+    let rows: PastMatch[] = [
+      ...feed.results.map(resultToPastMatch),
+      ...participation.map(participationToPastMatch),
+    ];
     if (effectiveTeam) {
-      list = list.filter((r) => fixtureKey(r) === effectiveTeam);
+      rows = rows.filter((r) => fixtureKey(r) === effectiveTeam);
     } else {
       const seen = new Set<string>();
-      list = list.filter((r) => {
+      rows = rows.filter((r) => {
         if (seen.has(r.id)) return false;
         seen.add(r.id);
         return true;
       });
     }
-    return [...list].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+    return rows.sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+  }, [feed, participation, effectiveTeam]);
+
+  // Played/won/drawn/lost and form are a standings summary, so they are built
+  // from open-age results only and never shown for a restricted team.
+  const openResults = useMemo(() => {
+    const list = feed.results.filter((r) => !isRowRestricted(r));
+    if (!effectiveTeam) return [];
+    return list
+      .filter((r) => fixtureKey(r) === effectiveTeam)
+      .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
   }, [feed, effectiveTeam]);
+
+  const restrictedCount = results.filter((r) => r.restricted).length;
+  const showRestrictedNotice = restrictedCount > 0 || fixtures.some(isRowRestricted);
 
   if (!feed) {
     return (
@@ -152,6 +239,12 @@ export function ClubFixturesDisplay({ feed }: Props) {
         allowDeselect={false}
       />
 
+      {showRestrictedNotice && (
+        <Alert icon={<IconShieldLock size={16} />} color="blue" title="Under-11 and below">
+          {RESTRICTED_RESULTS_NOTICE}
+        </Alert>
+      )}
+
       <Tabs defaultValue="fixtures">
         <Tabs.List>
           <Tabs.Tab value="fixtures" leftSection={<IconCalendar size={14} />}>
@@ -167,20 +260,28 @@ export function ClubFixturesDisplay({ feed }: Props) {
             <Text c="dimmed" size="sm">No upcoming fixtures.</Text>
           ) : (
             <Stack gap="xs">
-              {fixtures.map((f) => (
-                <Paper key={f.id} p="sm" withBorder radius="md">
-                  <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
-                    <Badge variant="light" size="xs">{f.division}</Badge>
-                    <Text size="xs" c="dimmed">{formatDate(f.date)} · {f.time}</Text>
-                  </Group>
-                  <Text fw={700} size="sm" ta="center">
-                    {effectiveTeam ? `${f.team} vs ${f.opponent}` : `${f.home_team} vs ${f.away_team}`}
-                  </Text>
-                  <Text size="xs" c="dimmed" ta="center">
-                    {effectiveTeam ? `${f.home_away === 'home' ? 'Home' : 'Away'} · ${f.venue}` : f.venue}
-                  </Text>
-                </Paper>
-              ))}
+              {fixtures.map((f) => {
+                const restricted = isRowRestricted(f);
+                const homeAway = f.home_away === 'home' ? 'Home' : 'Away';
+                return (
+                  <Paper key={f.id} p="sm" withBorder radius="md">
+                    <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
+                      <Badge variant="light" size="xs">{f.division}</Badge>
+                      <Text size="xs" c="dimmed">{formatDate(f.date)} · {f.time}</Text>
+                    </Group>
+                    <Text fw={700} size="sm" ta="center">
+                      {restricted
+                        ? `${f.team ?? OPPONENT_LABEL} vs ${OPPONENT_LABEL}`
+                        : effectiveTeam ? `${f.team} vs ${f.opponent}` : `${f.home_team} vs ${f.away_team}`}
+                    </Text>
+                    <Text size="xs" c="dimmed" ta="center">
+                      {restricted
+                        ? `${homeAway} · Opposition and venue not published`
+                        : effectiveTeam ? `${homeAway} · ${f.venue}` : f.venue}
+                    </Text>
+                  </Paper>
+                );
+              })}
             </Stack>
           )}
         </Tabs.Panel>
@@ -190,7 +291,7 @@ export function ClubFixturesDisplay({ feed }: Props) {
             <Text c="dimmed" size="sm">No results yet.</Text>
           ) : (
             <Stack gap="sm">
-              {effectiveTeam && !isYoungSelected && <ResultsStats results={results} />}
+              {effectiveTeam && <ResultsStats results={openResults} />}
               <Table striped highlightOnHover withTableBorder>
                 <Table.Thead>
                   <Table.Tr>
@@ -205,21 +306,23 @@ export function ClubFixturesDisplay({ feed }: Props) {
                   {results.map((r) => (
                     <Table.Tr key={r.id}>
                       <Table.Td>
-                        <Text size="xs">{formatDate(r.date)}</Text>
+                        <Text size="xs">{formatDate(r.date)} · {r.time}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm" fw={r.home_away === 'home' ? 700 : 400}>
-                          {r.home_team}
+                        <Text size="sm" fw={r.homeAway === 'home' ? 700 : 400}>
+                          {r.homeTeam}
                         </Text>
                       </Table.Td>
-                       <Table.Td ta="center">
-                         <Text size="sm" fw={700}>
-                           {isYoungAgeGroup(r.home_team) || isYoungAgeGroup(r.away_team) ? 'Score hidden' : `${r.home_score ?? 'X'} - ${r.away_score ?? 'X'}`}
-                         </Text>
-                       </Table.Td>
+                      <Table.Td ta="center">
+                        {r.score === null ? (
+                          <Text size="xs" c="dimmed" fs="italic">{SCORE_WITHHELD_LABEL}</Text>
+                        ) : (
+                          <Text size="sm" fw={700}>{r.score}</Text>
+                        )}
+                      </Table.Td>
                       <Table.Td>
-                        <Text size="sm" fw={r.home_away === 'away' ? 700 : 400}>
-                          {r.away_team}
+                        <Text size="sm" fw={r.homeAway === 'away' ? 700 : 400}>
+                          {r.awayTeam}
                         </Text>
                       </Table.Td>
                       <Table.Td visibleFrom="sm">

@@ -10,6 +10,8 @@ import {
 
 const CLUB = 'East Leake';
 const WEEK = '2026-08-31'; // Mon 31 Aug – Sun 6 Sep 2026
+/** Fixed clock: the Tuesday after WEEK, so that week's kick-offs are all past. */
+const NOW = new Date(2026, 8, 8, 12, 0);
 
 function makeResult(over: Partial<LiveResult> & Pick<LiveResult, 'id' | 'date' | 'team'>): LiveResult {
   const homeAway = over.home_away ?? 'home';
@@ -222,7 +224,7 @@ describe('why a score is missing', () => {
 
 describe('week selection', () => {
   it('offers only weeks the club played in, newest first', () => {
-    expect(weeksWithMatches(makeFeed())).toEqual(['2026-08-31', '2026-08-24']);
+    expect(weeksWithMatches(makeFeed(), NOW)).toEqual(['2026-08-31', '2026-08-24']);
   });
 
   it('counts participation weeks, so an all-U8 club still gets a week', () => {
@@ -230,7 +232,7 @@ describe('week selection', () => {
       club: CLUB, generated: new Date().toISOString(), fixtures: [], results: [],
       participation: [makeParticipation({ id: 'p', date: '2026-09-06', team: 'Quorn Lions U8' })],
     };
-    expect(weeksWithMatches(young)).toEqual(['2026-08-31']);
+    expect(weeksWithMatches(young, NOW)).toEqual(['2026-08-31']);
     expect(defaultWeek(young)).toBe('2026-08-31');
   });
 
@@ -302,6 +304,77 @@ describe('buildRoundup', () => {
     const quiet = buildRoundup(makeFeed(), '2026-10-05');
     expect(quiet.matches).toHaveLength(0);
     expect(quiet.summary.played).toBe(0);
+  });
+});
+
+describe('past fixtures with no result', () => {
+  /** A club whose league publishes no results row at all for its U7s. */
+  function fixtureOnlyFeed(): ClubFeed {
+    return {
+      club: CLUB,
+      generated: new Date().toISOString(),
+      fixtures: [
+        makeFixture({
+          id: 'u7', date: '2026-09-06', time: '09:30',
+          team: 'East Leake Bantams Yellow U7', opponent: 'Bunny FC U7',
+          division: 'U7 Development',
+        }),
+        makeFixture({
+          id: 'u7away', date: '2026-09-06', time: '11:00',
+          team: 'East Leake Bantams Girls U7', opponent: 'Keyworth United U7',
+          division: 'U7 Development', home_away: 'away',
+        }),
+      ],
+      results: [],
+    };
+  }
+
+  it('reports a U7 fixture whose kick-off has passed as a participation game', () => {
+    const roundup = buildRoundup(fixtureOnlyFeed(), WEEK, NOW);
+    expect(participationMatches(roundup).map(m => m.id)).toEqual(['u7', 'u7away']);
+    expect(participationMatches(roundup)[0]).toMatchObject({
+      kind: 'participation', team: 'Bantams Yellow U7', homeAway: 'home',
+    });
+  });
+
+  it('never names the opposition of one', () => {
+    const text = formatWhatsApp(buildRoundup(fixtureOnlyFeed(), WEEK, NOW));
+    expect(text).toContain('🔵 Sun 9:30am · Bantams Yellow U7 played at home');
+    expect(text).toContain('🔵 Sun 11am · Bantams Girls U7 played away');
+    expect(text).not.toContain('Bunny FC');
+    expect(text).not.toContain('Keyworth');
+  });
+
+  it('offers the week, so a club with only U7s is not told it played nothing', () => {
+    expect(weeksWithMatches(fixtureOnlyFeed(), NOW)).toEqual(['2026-08-31']);
+  });
+
+  it('waits for the kick-off to pass', () => {
+    // Two hours before kick-off on the day itself: not played yet.
+    const before = new Date(2026, 8, 6, 7, 30);
+    expect(buildRoundup(fixtureOnlyFeed(), WEEK, before).matches).toHaveLength(0);
+    // Well after it: played.
+    const after = new Date(2026, 8, 6, 11, 45);
+    expect(buildRoundup(fixtureOnlyFeed(), WEEK, after).matches.map(m => m.id)).toEqual(['u7']);
+  });
+
+  it('leaves open-age fixtures alone, where a missing result may just be late', () => {
+    const feed = fixtureOnlyFeed();
+    feed.fixtures = [makeFixture({
+      id: 'senior', date: '2026-09-06', time: '14:00', team: 'East Leake Reds U14',
+      opponent: 'Radcliffe Olympic U14', division: 'U14 Division 1',
+    })];
+    expect(buildRoundup(feed, WEEK, NOW).matches).toHaveLength(0);
+  });
+
+  it('does not duplicate a fixture that already has a result', () => {
+    const feed = fixtureOnlyFeed();
+    // Same match, so the scraper hashes it to the same id in both arrays.
+    feed.participation = [makeParticipation({
+      id: 'u7', date: '2026-09-06', time: '09:30', team: 'East Leake Bantams Yellow U7',
+    })];
+    const roundup = buildRoundup(feed, WEEK, NOW);
+    expect(roundup.matches.filter(m => m.id === 'u7')).toHaveLength(1);
   });
 });
 

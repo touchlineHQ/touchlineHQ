@@ -55,6 +55,19 @@ export interface Contact {
 }
 
 // Live feed types (from fulltimeFeeds)
+
+/**
+ * Publication policy a feed was generated under. fulltimeFeeds withholds
+ * results for teams at U11 and below; `results_withheld` counts what was left
+ * out so the site can say so rather than look empty.
+ */
+export interface FeedCompliance {
+  policy: string;
+  restricted_max_age_group: string;
+  results_withheld: number;
+  fixtures_withheld?: number;
+}
+
 export interface LiveFixture {
   id: string;
   date: string;
@@ -67,6 +80,8 @@ export interface LiveFixture {
   team: string;
   home_away: 'home' | 'away';
   opponent: string;
+  /** Set by the feed on U11-and-below fixtures, where opposition and venue are redacted. */
+  publication_restricted?: boolean;
 }
 
 export interface LiveResult extends LiveFixture {
@@ -79,6 +94,7 @@ export interface LiveResult extends LiveFixture {
 export interface ClubFeed {
   club: string;
   generated: string;
+  compliance?: FeedCompliance;
   fixtures: LiveFixture[];
   results: LiveResult[];
 }
@@ -93,6 +109,7 @@ export interface TeamFeed {
   team: string;
   league: string;
   generated: string;
+  compliance?: FeedCompliance;
   fixtures: Omit<LiveFixture, 'team' | 'home_away' | 'opponent'>[];
   results: Omit<LiveResult, 'team' | 'home_away' | 'opponent' | 'goals_for' | 'goals_against'>[];
 }

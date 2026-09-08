@@ -3,15 +3,13 @@ import {
   Title, Text, Stack, Paper, Badge, Group, Select, Tabs,
   Table, Alert,
 } from '@mantine/core';
-import { IconCalendar, IconTrophy, IconAlertCircle } from '@tabler/icons-react';
+import { IconCalendar, IconTrophy, IconAlertCircle, IconShieldLock } from '@tabler/icons-react';
 import type { ClubFeed, LiveResult, LiveFixture } from '../types';
+import {
+  OPPONENT_LABEL, RESTRICTED_RESULTS_NOTICE, isRowRestricted,
+} from '../utils/compliance';
 
 const FORM_GAMES = 5;
-
-function isYoungAgeGroup(teamName: string): boolean {
-  const youngPattern = /\b(U[78])(s?)\b/i;
-  return youngPattern.test(teamName);
-}
 
 function getOutcome(r: LiveResult): 'W' | 'D' | 'L' | null {
   if (r.goals_for === null || r.goals_against === null) return null;
@@ -88,7 +86,6 @@ export function ClubFixturesDisplay({ feed }: Props) {
 
   // Reset team dropdown when it's no longer in the available list
   const effectiveTeam = selectedTeam && teamOptions.some(o => o.value === selectedTeam) ? selectedTeam : null;
-  const isYoungSelected = effectiveTeam ? isYoungAgeGroup(effectiveTeam.split('\0')[0]) : false;
 
   const fixtures = useMemo(() => {
     let list = feed.fixtures;
@@ -105,7 +102,11 @@ export function ClubFixturesDisplay({ feed }: Props) {
     return [...list].sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
   }, [feed, effectiveTeam]);
 
-  const results = useMemo(() => {
+  // Scores and results are not published at U11 and below. The feed already
+  // withholds them, so this normally filters nothing — it is here so a stale
+  // cached feed, or one from a source we do not control, still cannot put a
+  // young team's score on screen.
+  const { results, resultsWithheld } = useMemo(() => {
     let list = feed.results;
     if (effectiveTeam) {
       list = list.filter((r) => fixtureKey(r) === effectiveTeam);
@@ -117,8 +118,19 @@ export function ClubFixturesDisplay({ feed }: Props) {
         return true;
       });
     }
-    return [...list].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+    const publishable = list.filter((r) => !isRowRestricted(r));
+    return {
+      results: [...publishable].sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time)),
+      resultsWithheld: list.length - publishable.length,
+    };
   }, [feed, effectiveTeam]);
+
+  // A young team whose results are all withheld would otherwise just look like
+  // a team that has not played yet.
+  const showRestrictedNotice =
+    resultsWithheld > 0 ||
+    (feed.compliance?.results_withheld ?? 0) > 0 ||
+    fixtures.some(isRowRestricted);
 
   if (!feed) {
     return (
@@ -152,6 +164,12 @@ export function ClubFixturesDisplay({ feed }: Props) {
         allowDeselect={false}
       />
 
+      {showRestrictedNotice && (
+        <Alert icon={<IconShieldLock size={16} />} color="blue" title="Under-11 and below">
+          {RESTRICTED_RESULTS_NOTICE}
+        </Alert>
+      )}
+
       <Tabs defaultValue="fixtures">
         <Tabs.List>
           <Tabs.Tab value="fixtures" leftSection={<IconCalendar size={14} />}>
@@ -167,30 +185,42 @@ export function ClubFixturesDisplay({ feed }: Props) {
             <Text c="dimmed" size="sm">No upcoming fixtures.</Text>
           ) : (
             <Stack gap="xs">
-              {fixtures.map((f) => (
-                <Paper key={f.id} p="sm" withBorder radius="md">
-                  <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
-                    <Badge variant="light" size="xs">{f.division}</Badge>
-                    <Text size="xs" c="dimmed">{formatDate(f.date)} · {f.time}</Text>
-                  </Group>
-                  <Text fw={700} size="sm" ta="center">
-                    {effectiveTeam ? `${f.team} vs ${f.opponent}` : `${f.home_team} vs ${f.away_team}`}
-                  </Text>
-                  <Text size="xs" c="dimmed" ta="center">
-                    {effectiveTeam ? `${f.home_away === 'home' ? 'Home' : 'Away'} · ${f.venue}` : f.venue}
-                  </Text>
-                </Paper>
-              ))}
+              {fixtures.map((f) => {
+                const restricted = isRowRestricted(f);
+                const homeAway = f.home_away === 'home' ? 'Home' : 'Away';
+                return (
+                  <Paper key={f.id} p="sm" withBorder radius="md">
+                    <Group justify="space-between" wrap="wrap" gap="xs" mb={4}>
+                      <Badge variant="light" size="xs">{f.division}</Badge>
+                      <Text size="xs" c="dimmed">{formatDate(f.date)} · {f.time}</Text>
+                    </Group>
+                    <Text fw={700} size="sm" ta="center">
+                      {restricted
+                        ? `${f.team} vs ${OPPONENT_LABEL}`
+                        : effectiveTeam ? `${f.team} vs ${f.opponent}` : `${f.home_team} vs ${f.away_team}`}
+                    </Text>
+                    <Text size="xs" c="dimmed" ta="center">
+                      {restricted
+                        ? `${homeAway} · Opposition and venue not published`
+                        : effectiveTeam ? `${homeAway} · ${f.venue}` : f.venue}
+                    </Text>
+                  </Paper>
+                );
+              })}
             </Stack>
           )}
         </Tabs.Panel>
 
         <Tabs.Panel value="results" pt="md" style={{ maxHeight: 500, overflowY: "scroll" }}>
           {results.length === 0 ? (
-            <Text c="dimmed" size="sm">No results yet.</Text>
+            <Text c="dimmed" size="sm">
+              {resultsWithheld > 0
+                ? 'Results are not published for this age group.'
+                : 'No results yet.'}
+            </Text>
           ) : (
             <Stack gap="sm">
-              {effectiveTeam && !isYoungSelected && <ResultsStats results={results} />}
+              {effectiveTeam && <ResultsStats results={results} />}
               <Table striped highlightOnHover withTableBorder>
                 <Table.Thead>
                   <Table.Tr>
@@ -212,11 +242,11 @@ export function ClubFixturesDisplay({ feed }: Props) {
                           {r.home_team}
                         </Text>
                       </Table.Td>
-                       <Table.Td ta="center">
-                         <Text size="sm" fw={700}>
-                           {isYoungAgeGroup(r.home_team) || isYoungAgeGroup(r.away_team) ? 'Score hidden' : `${r.home_score ?? 'X'} - ${r.away_score ?? 'X'}`}
-                         </Text>
-                       </Table.Td>
+                      <Table.Td ta="center">
+                        <Text size="sm" fw={700}>
+                          {`${r.home_score ?? 'X'} - ${r.away_score ?? 'X'}`}
+                        </Text>
+                      </Table.Td>
                       <Table.Td>
                         <Text size="sm" fw={r.home_away === 'away' ? 700 : 400}>
                           {r.away_team}

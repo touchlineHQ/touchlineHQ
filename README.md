@@ -47,15 +47,46 @@ functions/
 website/
   src/
     components/
-      TreasurerTool.tsx   # UI for generating player payment links
+      TreasurerTool.tsx        # UI for generating player payment links
+      ClubFixturesDisplay.tsx  # club fixtures/results tabs
+      TeamCalendarSearch.tsx   # team search + calendar subscription
     pages/
       PaymentSuccessPage.tsx
       PaymentCancelledPage.tsx
+    utils/
+      compliance.ts       # U11-and-below publication rules
   public/             # static assets and JSON club data
   package.json
 wrangler.toml         # Cloudflare Pages config (build command + output dir)
 .github/workflows/    # CI and deployment workflows
 ```
+
+## Youth football publication rules
+
+The FA prohibits publishing match results and league tables for teams playing at
+Under-11 and below, and the league's guidance extends that to naming the
+opposition or the venue in anything published online. For a team at U11 or
+below, the site therefore never renders:
+
+- a score, a result, or any win/draw/loss or form summary
+- the opposition's name — `Opposition` is shown instead
+- the venue
+
+Date, kick-off time, division and whether the match is home or away are still
+shown, and a short notice explains why the rest is missing. U12 to U18 and adult
+teams are displayed in full.
+
+The [fulltimeFeeds](https://github.com/touchlineHQ/fulltimeFeeds) feeds this site
+consumes are already redacted at source, so in the normal case nothing
+restricted reaches the browser. `website/src/utils/compliance.ts` is the second
+line: a visitor can be holding a feed cached before the rules landed, and a club
+may point the site at a feed we do not control, so every fixture and result is
+checked again before it is rendered. It mirrors `scraper/compliance.py` in
+fulltimeFeeds — **keep the two in step.**
+
+Age groups are read from the team names and the division label (`U10`,
+`Under 10`, `U10 Division 1`, …). A match with no age token anywhere is treated
+as adult football; where tokens disagree, the youngest wins.
 
 ## GoCardless payment automation
 

@@ -1,4 +1,4 @@
-import type { ClubFeed, LiveFixture, LiveResult, ParticipationEntry } from '../types';
+import type { ClubFeed, LiveResult, ParticipationEntry } from '../types';
 import { isRowRestricted } from './compliance';
 
 // Feed dates are plain "YYYY-MM-DD" strings. Every window/selection decision below
@@ -14,13 +14,6 @@ const MONTH_NAMES = [
 
 /** Treat a feed as stale once its `generated` stamp is older than this. */
 const STALE_AFTER_HOURS = 36;
-
-/**
- * How long after kick-off a fixture is taken to have been played. Grassroots
- * matches run about an hour; the margin keeps a game keeping kick-off later
- * today from being reported as though it had already happened.
- */
-const KICK_OFF_GRACE_MS = 2 * 60 * 60 * 1000;
 
 /** X/Twitter's hard limit — the social variant is trimmed to fit it. */
 export const SOCIAL_LIMIT = 280;
@@ -129,10 +122,6 @@ export interface RoundupUnscoredLine {
  * A U11-and-below match. The FA prohibits publishing results at these ages, and
  * the league's guidance extends that to the opposition and the venue, so this
  * line carries none of them — it says only that the team played, and when.
- *
- * Comes either from the feed's participation array or, where a league never
- * publishes a results row for these ages at all, from a fixture whose kick-off
- * has passed with no result against it.
  */
 export interface RoundupParticipationLine {
   kind: 'participation';
@@ -335,23 +324,11 @@ function byKickOff(a: { date: string; time: string }, b: { date: string; time: s
  * count: a club with only U11-and-below teams has no scored results at all, and
  * without them it would be offered no weeks to look at.
  */
-export function weeksWithMatches(feed: ClubFeed, now: Date = new Date()): string[] {
+export function weeksWithMatches(feed: ClubFeed): string[] {
   const weeks = new Set<string>();
-  const seenIds = new Set<string>();
-  for (const result of feed.results) {
-    seenIds.add(result.id);
-    weeks.add(mondayOf(result.date));
-  }
+  for (const result of feed.results) weeks.add(mondayOf(result.date));
   for (const entry of feed.participation ?? []) {
-    if (entry.played === false) continue;
-    seenIds.add(entry.id);
-    weeks.add(mondayOf(entry.date));
-  }
-  for (const fixture of feed.fixtures) {
-    if (seenIds.has(fixture.id)) continue;
-    if (!isRowRestricted(fixture)) continue;
-    if (!hasKickedOff(fixture.date, fixture.time, now)) continue;
-    weeks.add(mondayOf(fixture.date));
+    if (entry.played !== false) weeks.add(mondayOf(entry.date));
   }
   return [...weeks].sort((a, b) => b.localeCompare(a));
 }
@@ -361,71 +338,29 @@ export function defaultWeek(feed: ClubFeed): string | null {
   return weeksWithMatches(feed)[0] ?? null;
 }
 
-/**
- * Whether a fixture's kick-off is far enough in the past to call it played.
- * Both sides are local wall-clock: a 10am kick-off is 10am where the game is.
- */
-function hasKickedOff(date: string, time: string, now: Date): boolean {
-  const [year, month, day] = date.split('-').map(Number);
-  const [hours, minutes] = (time || '00:00').split(':').map(Number);
-  const kickOff = new Date(
-    year, month - 1, day,
-    Number.isFinite(hours) ? hours : 0,
-    Number.isFinite(minutes) ? minutes : 0,
-  );
-  return now.getTime() - kickOff.getTime() >= KICK_OFF_GRACE_MS;
-}
-
-/**
- * Past fixtures with no result recorded, for ages where none ever will be.
- *
- * Some leagues publish no results row whatsoever at U11 and below, so those
- * matches only ever exist as fixtures. Once the kick-off has passed they were
- * played, and belong in the roundup as participation games rather than sitting
- * in the fixture list for ever.
- *
- * Deliberately limited to restricted ages: at open age a fixture with no result
- * is more likely waiting on the league or postponed, and calling it played
- * would assert something we do not know.
- */
-function playedWithoutResult(
-  fixtures: LiveFixture[],
-  weekStart: string,
-  seenIds: Set<string>,
-  now: Date,
-): LiveFixture[] {
-  return fixtures.filter(fixture =>
-    inWeek(fixture.date, weekStart)
-    && !seenIds.has(fixture.id)
-    && isRowRestricted(fixture)
-    && hasKickedOff(fixture.date, fixture.time, now));
-}
-
 function isStale(generated: string): boolean {
   const stamp = Date.parse(generated);
   if (Number.isNaN(stamp)) return false;
   return Date.now() - stamp > STALE_AFTER_HOURS * 60 * 60 * 1000;
 }
 
-export function buildRoundup(feed: ClubFeed, weekStart: string, now: Date = new Date()): Roundup {
+export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
   const club = feed.club;
   const strip = (name: string) => stripClubPrefix(name, club);
   const matches: RoundupMatch[] = [];
-  // Every match id already placed. Fixtures, results and participation entries
-  // share one id for the same match (all hashed from date and both team names),
-  // so this keeps the three sources from listing it more than once.
-  const seenIds = new Set<string>();
+  // Ids already rendered as participation, so a redacted result row and the
+  // feed's own entry for the same match cannot both be listed.
+  const participationIds = new Set<string>();
 
   for (const group of groupById(feed.results.filter(r => inWeek(r.date, weekStart)))) {
     const [row] = group;
-    seenIds.add(row.id);
 
     // U11 and below must carry no score, opposition or venue. The feed sends
     // these as participation entries, so this only fires on a stale cached feed
     // or one from a source we do not control. Redact rather than drop: the
     // match still happened.
     if (isRowRestricted(row)) {
-      seenIds.add(row.id);
+      participationIds.add(row.id);
       matches.push(toParticipation({
         id: row.id,
         date: row.date,
@@ -483,22 +418,9 @@ export function buildRoundup(feed: ClubFeed, weekStart: string, now: Date = new 
     if (!inWeek(entry.date, weekStart)) continue;
     // `played: false` marks one still to come; a roundup reports what happened.
     if (entry.played === false) continue;
-    if (seenIds.has(entry.id)) continue;
-    seenIds.add(entry.id);
+    if (participationIds.has(entry.id)) continue;
+    participationIds.add(entry.id);
     matches.push(toParticipation(entry, strip));
-  }
-
-  for (const fixture of playedWithoutResult(feed.fixtures, weekStart, seenIds, now)) {
-    seenIds.add(fixture.id);
-    matches.push(toParticipation({
-      id: fixture.id,
-      date: fixture.date,
-      time: fixture.time,
-      team: fixture.team,
-      home_away: fixture.home_away,
-      division: fixture.division,
-      age_group: null,
-    }, strip));
   }
 
   matches.sort(byKickOff);

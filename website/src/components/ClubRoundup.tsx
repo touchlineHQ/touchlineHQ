@@ -367,6 +367,11 @@ export function ClubRoundup() {
               <IconTrophy size={16} color="var(--mantine-color-green-6)" />
               <Text fw={600} size="sm">This week's matches</Text>
             </Group>
+            {roundup.matches.length === 0 ? (
+              <Text size="sm" c="dimmed">No results published for this week.</Text>
+            ) : (
+              roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
+            )}
             {hasParticipation && (
               <Text size="xs" c="dimmed">{RESTRICTED_RESULTS_NOTICE}</Text>
             )}
@@ -378,11 +383,6 @@ export function ClubRoundup() {
                 {participationCount} participation game{participationCount === 1 ? '' : 's'} hidden
                 (Under-11 and below).
               </Text>
-            )}
-            {roundup.matches.length === 0 ? (
-              <Text size="sm" c="dimmed">No results published for this week.</Text>
-            ) : (
-              roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
             )}
           </Stack>
 

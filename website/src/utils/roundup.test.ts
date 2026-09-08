@@ -443,22 +443,23 @@ describe('message formats', () => {
     expect(formatWhatsApp(built)).not.toContain('Bunny FC');
   });
 
-  it('leads with the record and the caveat, then the matches', () => {
+  it('leads with the record and closes with the caveat', () => {
     const lines = formatWhatsApp(roundup, { link }).split('\n');
     const record = lines.findIndex(l => l.includes('Played 6'));
-    const caveat = lines.findIndex(l => l.includes('No score published'));
     const first = lines.findIndex(l => l.includes('Reds U14 0–3'));
+    const caveat = lines.findIndex(l => l.includes('No score published'));
     expect(record).toBeGreaterThan(-1);
-    expect(record).toBeLessThan(caveat);
-    expect(caveat).toBeLessThan(first);
+    expect(record).toBeLessThan(first);
+    expect(first).toBeLessThan(caveat);
   });
 
-  it('puts the same two above the matches in the email body', () => {
+  it('orders the email body the same way', () => {
     const lines = formatEmailBody(roundup, { link }).split('\n');
-    expect(lines.findIndex(l => l.includes('Played 6')))
-      .toBeLessThan(lines.findIndex(l => l.includes('No score published')));
-    expect(lines.findIndex(l => l.includes('No score published')))
-      .toBeLessThan(lines.findIndex(l => l.includes('Reds U14 0–3')));
+    const record = lines.findIndex(l => l.includes('Played 6'));
+    const first = lines.findIndex(l => l.includes('Reds U14 0–3'));
+    const caveat = lines.findIndex(l => l.includes('No score published'));
+    expect(record).toBeLessThan(first);
+    expect(first).toBeLessThan(caveat);
   });
 
   it('explains the blue dots from the reasons actually present', () => {

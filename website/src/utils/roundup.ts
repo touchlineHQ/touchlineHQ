@@ -586,15 +586,14 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
     blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
   }
 
-  // The caveat explains the blue dots, so it has to arrive before them.
-  const note = unscoredNote(roundup, emoji);
-  if (note) blocks.push(note);
-
   if (roundup.matches.length > 0) {
     blocks.push(roundup.matches.map(match => matchLine(match, emoji)).join('\n'));
   } else {
     blocks.push('No results published for this week.');
   }
+
+  const note = unscoredNote(roundup, emoji);
+  if (note) blocks.push(note);
 
   if (includeLink && link) blocks.push(`Full results:\n${link}`);
 
@@ -682,15 +681,14 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
       : `Played ${played}`);
   }
 
-  // The caveat explains the matches listed without a score, so it comes first.
-  const note = unscoredNote(roundup, emoji);
-  if (note) blocks.push(note);
-
   if (roundup.matches.length > 0) {
     blocks.push(roundup.matches.map(match => `  ${matchLine(match, emoji)}`).join('\n'));
   } else {
     blocks.push('  No results published for this week.');
   }
+
+  const note = unscoredNote(roundup, emoji);
+  if (note) blocks.push(note);
 
   if (includeLink && link) blocks.push(`Full results: ${link}`);
   blocks.push('Results from FA Full-Time via touchlineHQ.');

@@ -4,6 +4,7 @@ import {
   addDays, mondayOf, formatDayShort, formatDayRange, stripClubPrefix, getOutcome,
   weeksWithResults, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
   formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, ageGroupOf, unscoredReason,
+  xWeightedLength,
 } from './roundup';
 
 const CLUB = 'East Leake';
@@ -302,7 +303,17 @@ describe('message formats', () => {
     const social = formatSocial(roundup, { link });
     expect(social.length).toBeLessThanOrEqual(SOCIAL_LIMIT);
     expect(social.text).toContain('#EastLeake');
-    expect(social.length).toBe(social.text.length);
+    expect(social.length).toBe(xWeightedLength(social.text));
+  });
+
+  it('uses X weighted units for emoji and shortened links', () => {
+    expect(xWeightedLength('A⚽⚪')).toBe(5);
+    expect(xWeightedLength('See https://example.com/a/very/long/path')).toBe(27);
+
+    const social = formatSocial(roundup, { includeLink: false });
+    expect(social.text).toContain('⚽');
+    expect(social.text).toContain('⚪');
+    expect(social.length).toBe(social.text.length + 2);
   });
 
   it('trims lines rather than overflowing when there is too much to say', () => {

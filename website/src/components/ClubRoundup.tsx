@@ -200,7 +200,7 @@ export function ClubRoundup() {
     if (selectedClub) next.set('club', selectedClub);
     else if (clubsLoaded) next.delete('club');
     if (week) next.set('week', week);
-    else next.delete('week');
+    else if (selectedClub) next.delete('week');
     setSearchParams(next, { replace: true });
   }, [selectedClub, week, clubsLoaded]);
 

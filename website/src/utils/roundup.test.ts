@@ -3,7 +3,7 @@ import type { ClubFeed, LiveFixture, LiveResult } from '../types';
 import {
   addDays, mondayOf, formatDayShort, formatDayRange, stripClubPrefix, getOutcome,
   weeksWithResults, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
-  formatEmailSubject, formatEmailBody, SOCIAL_LIMIT,
+  formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, ageGroupOf, unscoredReason,
 } from './roundup';
 
 const CLUB = 'East Leake';
@@ -88,10 +88,16 @@ function makeFeed(): ClubFeed {
         home_team: 'East Leake Blue U10', away_team: 'East Leake Greens U10',
         home_score: 2, away_score: 1, goals_for: 1, goals_against: 2,
       }),
-      // Full-Time hasn't published a score yet.
+      // Played, but below U12 the league prints "X - X" instead of a score.
       makeResult({
-        id: 'pending', date: '2026-09-06', time: '12:00', team: 'East Leake Whites U9',
-        opponent: 'Sutton Bonington U9',
+        id: 'young', date: '2026-09-06', time: '12:00', team: 'East Leake Whites U9',
+        opponent: 'Sutton Bonington U9', division: 'U9 Sun Spring Div 3 Red',
+        home_score: null, away_score: null, goals_for: null, goals_against: null,
+      }),
+      // A friendly — no result recorded regardless of age group.
+      makeResult({
+        id: 'friendly', date: '2026-09-06', time: '13:00', team: 'East Leake Reds U14',
+        opponent: 'Gotham Rangers U14', division: 'U14 Friendly',
         home_score: null, away_score: null, goals_for: null, goals_against: null,
       }),
       // Previous week — must not appear.
@@ -158,6 +164,41 @@ describe('getOutcome', () => {
   });
 });
 
+describe('why a score is missing', () => {
+  it('reads the age group off a division or team name', () => {
+    expect(ageGroupOf('U10 Sun Spring Div 3 Red')).toBe(10);
+    expect(ageGroupOf('Division 1', 'East Leake Blue U8')).toBe(8);
+    expect(ageGroupOf('Premier Division', 'Arnold Town')).toBeNull();
+  });
+
+  it('ignores numbers that are not age groups', () => {
+    expect(ageGroupOf('Division 3')).toBeNull();
+    expect(ageGroupOf('U99 Nonsense')).toBeNull();
+  });
+
+  it('blames the competition when it says friendly', () => {
+    expect(unscoredReason({ division: 'U14 Friendly', team: 'A U14', opponent: 'B U14' }))
+      .toBe('friendly');
+    // Explicit beats inferred: a young friendly is still a friendly.
+    expect(unscoredReason({ division: 'U9 Friendlies', team: 'A U9', opponent: 'B U9' }))
+      .toBe('friendly');
+  });
+
+  it('blames the age group below U12, where scores are not published', () => {
+    expect(unscoredReason({ division: 'U9 Div 3', team: 'A U9', opponent: 'B U9' }))
+      .toBe('age-group');
+    expect(unscoredReason({ division: 'U11 Div 1', team: 'A U11', opponent: 'B U11' }))
+      .toBe('age-group');
+  });
+
+  it('does not guess when the match is competitive and unexplained', () => {
+    expect(unscoredReason({ division: 'U14 Division 1', team: 'A U14', opponent: 'B U14' }))
+      .toBe('withheld');
+    expect(unscoredReason({ division: 'Premier Division', team: 'Arnold Town', opponent: 'Quorn' }))
+      .toBe('withheld');
+  });
+});
+
 describe('week selection', () => {
   it('offers only weeks that hold results, newest first', () => {
     expect(weeksWithResults(makeFeed())).toEqual(['2026-08-31', '2026-08-24']);
@@ -198,10 +239,13 @@ describe('buildRoundup', () => {
     });
   });
 
-  it('holds unscored matches back from the results', () => {
-    expect(roundup.results.map(l => l.id)).not.toContain('pending');
-    expect(roundup.pending).toHaveLength(1);
-    expect(roundup.pending[0]).toMatchObject({ team: 'Whites U9', opponent: 'Sutton Bonington U9' });
+  it('separates played-but-unscored matches from the results', () => {
+    expect(roundup.results.map(l => l.id)).not.toContain('young');
+    expect(roundup.unscored.map(l => l.id)).toEqual(['young', 'friendly']);
+    expect(roundup.unscored[0]).toMatchObject({
+      team: 'Whites U9', opponent: 'Sutton Bonington U9', reason: 'age-group',
+    });
+    expect(roundup.unscored[1]).toMatchObject({ team: 'Reds U14', reason: 'friendly' });
   });
 
   it('counts only scored, non-derby matches, so P equals W+D+L', () => {
@@ -237,7 +281,6 @@ describe('message formats', () => {
     expect(text).toContain('🔴 Reds U14 0–3 Radcliffe Olympic U14');
     expect(text).toContain('⚪ Blue U10 2–1 Greens U10');
     expect(text).toContain('P3 · W1 D1 L1 · GF 6 GA 6');
-    expect(text).toContain('Awaiting result:');
     expect(text).toContain(link);
   });
 
@@ -287,8 +330,32 @@ describe('message formats', () => {
     expect(body).not.toMatch(/[🟢🟡🔴]/u);
   });
 
+  it('lists played-but-unscored matches without calling them pending', () => {
+    const text = formatWhatsApp(roundup, { link });
+    expect(text).not.toMatch(/awaiting/i);
+    expect(text).toContain('🤝 Also played — no score published');
+    expect(text).toContain('• Whites U9 vs Sutton Bonington U9');
+    expect(text).toContain('• Reds U14 vs Gotham Rangers U14 (friendly)');
+    expect(formatEmailBody(roundup, { link })).toContain('Also played — no score published');
+  });
+
+  it('calls the block Friendlies when that is all it holds', () => {
+    const feed = makeFeed();
+    feed.results = [makeResult({
+      id: 'fr', date: '2026-09-06', team: 'East Leake Blue U10',
+      opponent: 'Bunny FC U10', division: 'U10 Friendly',
+      home_score: null, away_score: null, goals_for: null, goals_against: null,
+    })];
+    const text = formatWhatsApp(buildRoundup(feed, WEEK));
+    expect(text).toContain('🤝 Friendlies');
+    // The week was played, so the message must not claim otherwise.
+    expect(text).not.toContain('No results published for this week.');
+    expect(text).toContain('Sun 6 Sep');
+  });
+
   it('says so plainly when a week has no results', () => {
     const quiet = buildRoundup(makeFeed(), '2026-10-05');
+    expect(quiet.unscored).toHaveLength(0);
     expect(formatWhatsApp(quiet)).toContain('No results published for this week.');
     expect(formatSocial(quiet).text).toContain('No results published this week.');
   });

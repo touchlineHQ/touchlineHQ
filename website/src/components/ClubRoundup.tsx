@@ -14,7 +14,7 @@ import type { ClubFeed } from '../types';
 import {
   buildRoundup, defaultWeek, weeksWithMatches, addDays, formatDayRange, formatKickOffLabel,
   formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, unscoredMatches,
-  participationMatches, withParticipation, SOCIAL_LIMIT,
+  participationMatches, withParticipation, hasRecord, SOCIAL_LIMIT,
 } from '../utils/roundup';
 import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
 import { RESTRICTED_RESULTS_NOTICE } from '../utils/compliance';
@@ -85,23 +85,31 @@ function unscoredExplanation(lines: RoundupUnscoredLine[]): string {
 function SummaryChips({ roundup }: { roundup: Roundup }) {
   const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
   if (played === 0) return null;
+  // "Played" spelled out: it counts every match, so it is not the P of a league
+  // table, where P would equal W + D + L.
   return (
     <Paper p="sm" withBorder radius="md">
       <Group gap="lg" wrap="wrap">
         <Group gap="xs">
-          <Text size="xs" c="dimmed" fw={500}>P</Text>
+          <Text size="xs" c="dimmed" fw={500}>Played</Text>
           <Text size="sm" fw={700}>{played}</Text>
-          <Text size="xs" c="green" fw={500} ml={4}>W</Text>
-          <Text size="sm" fw={700} c="green">{won}</Text>
-          <Text size="xs" c="yellow.7" fw={500} ml={4}>D</Text>
-          <Text size="sm" fw={700} c="yellow.7">{drawn}</Text>
-          <Text size="xs" c="red" fw={500} ml={4}>L</Text>
-          <Text size="sm" fw={700} c="red">{lost}</Text>
         </Group>
-        <Group gap="xs">
-          <Text size="xs" c="dimmed" fw={500}>Goals</Text>
-          <Text size="sm" fw={700}>{goalsFor}–{goalsAgainst}</Text>
-        </Group>
+        {hasRecord(roundup.summary) && (
+          <>
+            <Group gap="xs">
+              <Text size="xs" c="green" fw={500}>W</Text>
+              <Text size="sm" fw={700} c="green">{won}</Text>
+              <Text size="xs" c="yellow.7" fw={500} ml={4}>D</Text>
+              <Text size="sm" fw={700} c="yellow.7">{drawn}</Text>
+              <Text size="xs" c="red" fw={500} ml={4}>L</Text>
+              <Text size="sm" fw={700} c="red">{lost}</Text>
+            </Group>
+            <Group gap="xs">
+              <Text size="xs" c="dimmed" fw={500}>Goals</Text>
+              <Text size="sm" fw={700}>{goalsFor}–{goalsAgainst}</Text>
+            </Group>
+          </>
+        )}
       </Group>
     </Paper>
   );
@@ -359,11 +367,6 @@ export function ClubRoundup() {
               <IconTrophy size={16} color="var(--mantine-color-green-6)" />
               <Text fw={600} size="sm">This week's matches</Text>
             </Group>
-            {roundup.matches.length === 0 ? (
-              <Text size="sm" c="dimmed">No results published for this week.</Text>
-            ) : (
-              roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
-            )}
             {hasParticipation && (
               <Text size="xs" c="dimmed">{RESTRICTED_RESULTS_NOTICE}</Text>
             )}
@@ -375,6 +378,11 @@ export function ClubRoundup() {
                 {participationCount} participation game{participationCount === 1 ? '' : 's'} hidden
                 (Under-11 and below).
               </Text>
+            )}
+            {roundup.matches.length === 0 ? (
+              <Text size="sm" c="dimmed">No results published for this week.</Text>
+            ) : (
+              roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
             )}
           </Stack>
 

@@ -5,7 +5,7 @@ import {
   weeksWithMatches, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
   formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, unscoredReason,
   formatKickOff, formatKickOffLabel, unscoredMatches, participationMatches,
-  withParticipation, xWeightedLength,
+  withParticipation, hasRecord, xWeightedLength,
 } from './roundup';
 
 const CLUB = 'East Leake';
@@ -284,11 +284,29 @@ describe('buildRoundup', () => {
     expect(unscored[0]).toMatchObject({ team: 'Reds U14', reason: 'friendly' });
   });
 
-  it('counts only scored, non-derby matches, so P equals W+D+L', () => {
+  it('counts every match as played, including participation and derbies', () => {
     const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
-    expect({ played, won, drawn, lost, goalsFor, goalsAgainst })
-      .toEqual({ played: 3, won: 1, drawn: 1, lost: 1, goalsFor: 6, goalsAgainst: 6 });
-    expect(played).toBe(won + drawn + lost);
+    // r3, derby, r1, r2, young, friendly — the whole list.
+    expect(played).toBe(roundup.matches.length);
+    expect(played).toBe(6);
+    // The record stays narrower: only matches with a result the club can claim.
+    expect({ won, drawn, lost, goalsFor, goalsAgainst })
+      .toEqual({ won: 1, drawn: 1, lost: 1, goalsFor: 6, goalsAgainst: 6 });
+    expect(played).toBeGreaterThan(won + drawn + lost);
+  });
+
+  it('drops hidden participation games from played as well as from the list', () => {
+    const without = withParticipation(roundup, false);
+    expect(without.summary.played).toBe(roundup.summary.played - 1);
+    expect(without.summary.won).toBe(roundup.summary.won);
+  });
+
+  it('reports a played count but no record when nothing was scored', () => {
+    const feed = makeFeed();
+    feed.results = [];
+    const young = buildRoundup(feed, WEEK);
+    expect(young.summary.played).toBe(1);
+    expect(hasRecord(young.summary)).toBe(false);
   });
 
   it('flags a feed that has not refreshed recently', () => {
@@ -318,7 +336,7 @@ describe('message formats', () => {
     expect(text).toContain('⚪ Sun 9am · Blue U12 2–1 Greens U12');
     expect(text).toContain('🔵 Sun 12pm · Whites U9 played at home');
     expect(text).toContain('🔵 Sun 1pm · Reds U14 vs Gotham Rangers U14 (friendly)');
-    expect(text).toContain('P3 · W1 D1 L1 · GF 6 GA 6');
+    expect(text).toContain('Played 6 · W1 D1 L1 · GF 6 GA 6');
     expect(text).toContain(link);
   });
 
@@ -372,7 +390,7 @@ describe('message formats', () => {
   it('writes an email subject and a plain-text body', () => {
     expect(formatEmailSubject(roundup)).toBe('East Leake results — week ending Sun 6 Sep');
     const body = formatEmailBody(roundup, { link });
-    expect(body).toContain('Played 3  Won 1  Drawn 1  Lost 1');
+    expect(body).toContain('Played 6  Won 1  Drawn 1  Lost 1');
     expect(body).toContain('Goals for 6, against 6');
     expect(body).toContain('Results from FA Full-Time via touchlineHQ.');
     expect(body).not.toMatch(/[🟢🟡🔴]/u);
@@ -404,7 +422,9 @@ describe('message formats', () => {
     expect(text).not.toContain('U11 and below');
     // The competitive results and the record are untouched.
     expect(text).toContain('Blue U12 4–1 Ruddington Village U12');
-    expect(without.summary).toEqual(roundup.summary);
+    // Played drops with them; the record is untouched.
+    expect(without.summary.played).toBe(roundup.summary.played - 1);
+    expect(without.summary.won).toBe(roundup.summary.won);
     // The friendly is not a participation game and stays.
     expect(text).toContain('Gotham Rangers U14 (friendly)');
   });
@@ -421,6 +441,24 @@ describe('message formats', () => {
     expect(participationMatches(built).map(m => m.id)).toEqual(['yf']);
     expect(unscoredMatches(built)).toHaveLength(0);
     expect(formatWhatsApp(built)).not.toContain('Bunny FC');
+  });
+
+  it('leads with the record and the caveat, then the matches', () => {
+    const lines = formatWhatsApp(roundup, { link }).split('\n');
+    const record = lines.findIndex(l => l.includes('Played 6'));
+    const caveat = lines.findIndex(l => l.includes('No score published'));
+    const first = lines.findIndex(l => l.includes('Reds U14 0–3'));
+    expect(record).toBeGreaterThan(-1);
+    expect(record).toBeLessThan(caveat);
+    expect(caveat).toBeLessThan(first);
+  });
+
+  it('puts the same two above the matches in the email body', () => {
+    const lines = formatEmailBody(roundup, { link }).split('\n');
+    expect(lines.findIndex(l => l.includes('Played 6')))
+      .toBeLessThan(lines.findIndex(l => l.includes('No score published')));
+    expect(lines.findIndex(l => l.includes('No score published')))
+      .toBeLessThan(lines.findIndex(l => l.includes('Reds U14 0–3')));
   });
 
   it('explains the blue dots from the reasons actually present', () => {

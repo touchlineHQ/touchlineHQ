@@ -37,6 +37,37 @@ export async function loadClubSlugs(): Promise<string[]> {
   }
 }
 
+export interface FeedClubEntry {
+  name: string;
+  slug: string;
+}
+
+/**
+ * Fetch the list of clubs from the feed index.
+ *
+ * index.json carries one `clubs[]` entry per club *per league*, so a club that
+ * plays both Saturday and Sunday football appears more than once. Entries are
+ * de-duplicated on slug here, keeping the club's real name so callers don't have
+ * to title-case the slug back into something approximating it.
+ */
+export async function loadClubIndex(): Promise<FeedClubEntry[]> {
+  try {
+    const res = await fetch(INDEX_URL);
+    if (!res.ok) return [];
+    const data = await res.json() as { clubs?: { name?: string; slug?: string }[] };
+    if (!Array.isArray(data?.clubs)) return [];
+
+    const bySlug = new Map<string, FeedClubEntry>();
+    for (const club of data.clubs) {
+      if (!club?.slug || bySlug.has(club.slug)) continue;
+      bySlug.set(club.slug, { name: club.name || club.slug, slug: club.slug });
+    }
+    return [...bySlug.values()].sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
 /** Fetch the full feed index — every team across all leagues. */
 export async function loadAllFeedTeams(): Promise<FeedTeamEntry[]> {
   try {

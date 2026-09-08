@@ -8,6 +8,7 @@ import { createClubTheme } from './theme';
 import { SiteHeader } from './components/SiteHeader';
 import { HomePage } from './pages/HomePage';
 import { CalendarPage } from './pages/CalendarPage';
+import { RoundupPage } from './pages/RoundupPage';
 import { PaymentSuccessPage } from './pages/PaymentSuccessPage';
 import { PaymentCancelledPage } from './pages/PaymentCancelledPage';
 
@@ -58,6 +59,7 @@ export const App = () => {
               <Routes>
                 <Route path="/" element={<HomePage data={data} />} />
                 <Route path="/calendar" element={<CalendarPage />} />
+                <Route path="/roundup" element={<RoundupPage />} />
                 <Route path="/payment-success" element={<PaymentSuccessPage />} />
                 <Route path="/payment-cancelled" element={<PaymentCancelledPage />} />
                 <Route path="*" element={<HomePage data={data} />} />

@@ -1,6 +1,6 @@
 import { AppShell, Group, Text, ActionIcon, Button, Burger, Drawer, Stack, Box, Image } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconBrandGithub, IconBrandTwitter, IconBrandLinkedin, IconHome, IconCalendar, IconMail } from '@tabler/icons-react';
+import { IconBrandGithub, IconBrandTwitter, IconBrandLinkedin, IconHome, IconCalendar, IconMail, IconTrophy } from '@tabler/icons-react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { Club } from '../types';
@@ -21,6 +21,7 @@ export const SiteHeader = ({ club }: Props) => {
   const navItems: NavItem[] = [
     { to: '/', label: 'Home', icon: <IconHome size={18} /> },
     { to: '/calendar', label: 'Team Calendars', icon: <IconCalendar size={18} /> },
+    { to: '/roundup', label: 'Weekly Roundup', icon: <IconTrophy size={18} /> },
   ];
 
   const handleNavClick = () => {

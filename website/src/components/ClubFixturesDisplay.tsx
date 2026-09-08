@@ -5,19 +5,13 @@ import {
 } from '@mantine/core';
 import { IconCalendar, IconTrophy, IconAlertCircle } from '@tabler/icons-react';
 import type { ClubFeed, LiveResult, LiveFixture } from '../types';
+import { getOutcome } from '../utils/roundup';
 
 const FORM_GAMES = 5;
 
 function isYoungAgeGroup(teamName: string): boolean {
   const youngPattern = /\b(U[78])(s?)\b/i;
   return youngPattern.test(teamName);
-}
-
-function getOutcome(r: LiveResult): 'W' | 'D' | 'L' | null {
-  if (r.goals_for === null || r.goals_against === null) return null;
-  if (r.goals_for > r.goals_against) return 'W';
-  if (r.goals_for === r.goals_against) return 'D';
-  return 'L';
 }
 
 const outcomeColor: Record<'W' | 'D' | 'L', string> = { W: 'green', D: 'yellow', L: 'red' };

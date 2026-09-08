@@ -63,13 +63,15 @@ export const CalendarPage = () => {
         <Container size="lg">
           <Stack gap="xl">
             <Box ta="center">
-              <Group justify="center" gap="md" mb="md">
-                <Image src={`${import.meta.env.BASE_URL}images/logo.png`} alt="TouchlineHQ logo" h={50} w="auto" />
-                <div>
+              <Stack gap="xs" mb="md">
+                <Group justify="center">
+                  <Image src={`${import.meta.env.BASE_URL}images/logo.png`} alt="TouchlineHQ logo" h={50} w="auto" />
+                </Group>
+                <Stack gap={2}>
                   <Text size="sm" fw={600} c="green.8" tt="uppercase" ta="center">Fixture Calendars</Text>
                   <Title order={1} ta="center">Your team's fixtures, in your calendar</Title>
-                </div>
-              </Group>
+                </Stack>
+              </Stack>
               <Text size="lg" c="dimmed" ta="center" maw={800} mx="auto">
                 Search for your team and subscribe to a live calendar feed. Every fixture is added automatically and kept up to date all season — free for every club and team.
               </Text>

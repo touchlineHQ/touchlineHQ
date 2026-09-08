@@ -68,13 +68,15 @@ export const RoundupPage = () => {
         <Container size="lg">
           <Stack gap="xl">
             <Box ta="center">
-              <Group justify="center" gap="md" mb="md">
-                <Image src={`${import.meta.env.BASE_URL}images/logo.png`} alt="TouchlineHQ logo" h={50} w="auto" />
-                <div>
+              <Stack gap="xs" mb="md">
+                <Group justify="center">
+                  <Image src={`${import.meta.env.BASE_URL}images/logo.png`} alt="TouchlineHQ logo" h={50} w="auto" />
+                </Group>
+                <Stack gap={2}>
                   <Text size="sm" fw={600} c="green.8" tt="uppercase" ta="center">Weekly Roundup</Text>
                   <Title order={1} ta="center">Your club's results, ready to send</Title>
-                </div>
-              </Group>
+                </Stack>
+              </Stack>
               <Text size="lg" c="dimmed" ta="center" maw={800} mx="auto">
                 Find your club and get every team's result from the weekend written up as a message —
                 for the team WhatsApp group, your club socials, or the parents' mailing list.

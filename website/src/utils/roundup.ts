@@ -59,19 +59,6 @@ export interface RoundupPendingLine {
   homeAway: 'home' | 'away';
 }
 
-export interface RoundupFixtureLine {
-  id: string;
-  date: string;
-  time: string;
-  team: string;
-  opponent: string;
-  homeAway: 'home' | 'away';
-  venue: string;
-  division: string;
-  /** Both sides are this club's teams. */
-  derby: boolean;
-}
-
 export interface RoundupSummary {
   played: number;
   won: number;
@@ -89,15 +76,12 @@ export interface Roundup {
   weekEnd: string;
   results: RoundupLine[];
   pending: RoundupPendingLine[];
-  /** Fixtures in the week *after* weekStart..weekEnd. */
-  fixtures: RoundupFixtureLine[];
   summary: RoundupSummary;
   generated: string;
   stale: boolean;
 }
 
 export interface FormatOptions {
-  includeFixtures?: boolean;
   includeLink?: boolean;
   emoji?: boolean;
   link?: string;
@@ -263,27 +247,8 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     });
   }
 
-  const nextWeekStart = addDays(weekStart, 7);
-  const fixtures: RoundupFixtureLine[] = groupById(
-    feed.fixtures.filter(f => inWeek(f.date, nextWeekStart)),
-  ).map(group => {
-    const [row] = group;
-    return {
-      id: row.id,
-      date: row.date,
-      time: row.time,
-      team: strip(row.team),
-      opponent: row.opponent,
-      homeAway: row.home_away,
-      venue: row.venue,
-      division: row.division,
-      derby: group.length > 1,
-    };
-  });
-
   results.sort(byKickOff);
   pending.sort(byKickOff);
-  fixtures.sort(byKickOff);
 
   return {
     club,
@@ -291,7 +256,6 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     weekEnd: addDays(weekStart, 6),
     results,
     pending,
-    fixtures,
     summary: summarise(results),
     generated: feed.generated,
     stale: isStale(feed.generated),
@@ -356,20 +320,13 @@ function scoreLine(line: RoundupLine, emoji: boolean): string {
   return `${marker}${line.team} ${line.goalsFor}–${line.goalsAgainst} ${line.opponent}`;
 }
 
-function fixtureLine(fixture: RoundupFixtureLine): string {
-  if (fixture.derby) return `${fixture.team} vs ${fixture.opponent}`;
-  return fixture.homeAway === 'home'
-    ? `${fixture.team} vs ${fixture.opponent}`
-    : `${fixture.team} away to ${fixture.opponent}`;
-}
-
 function summaryLine(summary: RoundupSummary): string {
   const { played, won, drawn, lost, goalsFor, goalsAgainst } = summary;
   return `P${played} · W${won} D${drawn} L${lost} · GF ${goalsFor} GA ${goalsAgainst}`;
 }
 
 export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): string {
-  const { includeFixtures = true, includeLink = true, emoji = true, link = '' } = options;
+  const { includeLink = true, emoji = true, link = '' } = options;
   const blocks: string[] = [];
 
   blocks.push(
@@ -392,14 +349,6 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
         .map(p => `• ${p.team} vs ${p.opponent}`)
         .join('\n')}`,
     );
-  }
-
-  if (includeFixtures && roundup.fixtures.length > 0) {
-    const lines = roundup.fixtures.map(fixture => {
-      const where = fixture.venue ? ` — ${fixture.venue}` : '';
-      return `• ${fixtureLine(fixture)}\n  ${formatDayShort(fixture.date)}, ${fixture.time}${where}`;
-    });
-    blocks.push(`${emoji ? '📅 ' : ''}Next up\n${lines.join('\n')}`);
   }
 
   if (includeLink && link) blocks.push(`Full results:\n${link}`);
@@ -470,7 +419,7 @@ export function formatEmailSubject(roundup: Roundup): string {
 }
 
 export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): string {
-  const { includeFixtures = true, includeLink = true, emoji = false, link = '' } = options;
+  const { includeLink = true, emoji = false, link = '' } = options;
   const blocks: string[] = [];
 
   blocks.push(`Results, ${resultsRange(roundup)}`);
@@ -495,14 +444,6 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
         .map(p => `  ${p.team} vs ${p.opponent}`)
         .join('\n')}`,
     );
-  }
-
-  if (includeFixtures && roundup.fixtures.length > 0) {
-    const lines = roundup.fixtures.map(fixture => {
-      const where = fixture.venue ? `, ${fixture.venue}` : '';
-      return `  ${formatDayShort(fixture.date)} ${fixture.time}  ${fixtureLine(fixture)}${where}`;
-    });
-    blocks.push(`Next week's fixtures\n${lines.join('\n')}`);
   }
 
   if (includeLink && link) blocks.push(`Full results: ${link}`);

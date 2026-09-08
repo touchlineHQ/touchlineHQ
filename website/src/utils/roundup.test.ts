@@ -211,11 +211,6 @@ describe('buildRoundup', () => {
     expect(played).toBe(won + drawn + lost);
   });
 
-  it('looks a week ahead for fixtures', () => {
-    expect(roundup.fixtures.map(f => f.id)).toEqual(['f1', 'f2']);
-    expect(roundup.fixtures[0].team).toBe('Blue U10');
-  });
-
   it('flags a feed that has not refreshed recently', () => {
     const stale = makeFeed();
     stale.generated = '2026-09-01T06:00:00Z';
@@ -243,16 +238,21 @@ describe('message formats', () => {
     expect(text).toContain('⚪ Blue U10 2–1 Greens U10');
     expect(text).toContain('P3 · W1 D1 L1 · GF 6 GA 6');
     expect(text).toContain('Awaiting result:');
-    expect(text).toContain('Maroon U12 away to Cotgrave Colts U12');
     expect(text).toContain(link);
   });
 
-  it('drops emoji and the fixtures block on request', () => {
-    const text = formatWhatsApp(roundup, { emoji: false, includeFixtures: false, includeLink: false });
+  it('drops emoji and the link on request', () => {
+    const text = formatWhatsApp(roundup, { emoji: false, includeLink: false });
     expect(text).not.toMatch(/[⚽🟢🟡🔴📅📊]/u);
     expect(text).toContain('(W) Blue U10 4–1 Ruddington Village U10');
-    expect(text).not.toContain('Next up');
     expect(text).not.toContain('http');
+  });
+
+  it('reports results only, never upcoming fixtures', () => {
+    const text = formatWhatsApp(roundup, { link });
+    expect(text).not.toContain('Next up');
+    expect(text).not.toContain('Bingham Town U10');
+    expect(formatEmailBody(roundup, { link })).not.toContain("Next week's fixtures");
   });
 
   it('keeps the social variant inside the character limit', () => {
@@ -283,7 +283,6 @@ describe('message formats', () => {
     const body = formatEmailBody(roundup, { link });
     expect(body).toContain('Played 3  Won 1  Drawn 1  Lost 1');
     expect(body).toContain('Goals for 6, against 6');
-    expect(body).toContain("Next week's fixtures");
     expect(body).toContain('Results from FA Full-Time via touchlineHQ.');
     expect(body).not.toMatch(/[🟢🟡🔴]/u);
   });

@@ -84,7 +84,6 @@ export function ClubRoundup() {
   const [error, setError] = useState<string | null>(null);
 
   const [format, setFormat] = useState<Format>('whatsapp');
-  const [includeFixtures, setIncludeFixtures] = useState(true);
   const [includeLink, setIncludeLink] = useState(true);
   const [emoji, setEmoji] = useState(true);
 
@@ -194,7 +193,7 @@ export function ClubRoundup() {
 
   const message = useMemo(() => {
     if (!roundup) return null;
-    const options = { includeFixtures, includeLink, emoji, link };
+    const options = { includeLink, emoji, link };
     if (format === 'email') {
       return {
         subject: formatEmailSubject(roundup),
@@ -209,12 +208,12 @@ export function ClubRoundup() {
     }
     const body = formatWhatsApp(roundup, options);
     return { subject: null, body, length: null as number | null, truncated: false };
-  }, [roundup, format, includeFixtures, includeLink, emoji, link]);
+  }, [roundup, format, includeLink, emoji, link]);
 
   useEffect(() => {
     setCopied(false);
     setCopyFailed(false);
-  }, [format, includeFixtures, includeLink, emoji, week]);
+  }, [format, includeLink, emoji, week]);
 
   const copy = async () => {
     if (!message) return;
@@ -334,12 +333,6 @@ export function ClubRoundup() {
 
             <Group gap="lg" wrap="wrap">
               <Switch
-                label="Next week's fixtures"
-                checked={includeFixtures}
-                onChange={e => setIncludeFixtures(e.currentTarget.checked)}
-                size="sm"
-              />
-              <Switch
                 label="Link back"
                 checked={includeLink}
                 onChange={e => setIncludeLink(e.currentTarget.checked)}
@@ -405,6 +398,10 @@ export function ClubRoundup() {
               variant="light"
               color="green.6"
               c="green.9"
+              style={{
+                '--button-bg': 'var(--mantine-color-green-1)',
+                '--button-hover': 'var(--mantine-color-green-0)',
+              }}
               radius="xl"
               flex="1 0 auto"
             >

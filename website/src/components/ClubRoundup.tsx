@@ -14,7 +14,7 @@ import type { ClubFeed } from '../types';
 import {
   buildRoundup, defaultWeek, weeksWithMatches, addDays, formatDayRange, formatKickOffLabel,
   formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, unscoredMatches,
-  participationMatches, withParticipation, hasRecord, SOCIAL_LIMIT,
+  participationMatches, withParticipation, hasRecord, scoreline, SOCIAL_LIMIT,
 } from '../utils/roundup';
 import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
 import { RESTRICTED_RESULTS_NOTICE } from '../utils/compliance';
@@ -45,12 +45,8 @@ function MatchBadge({ match }: { match: RoundupMatch }) {
 }
 
 function matchText(match: RoundupMatch): string {
-  if (match.kind === 'result') {
-    return `${match.team} ${match.goalsFor}–${match.goalsAgainst} ${match.opponent}`;
-  }
-  if (match.kind === 'derby') {
-    return `${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`;
-  }
+  // Shared with the message, so the page and what gets sent cannot disagree.
+  if (match.kind === 'result' || match.kind === 'derby') return scoreline(match);
   // No opposition or venue for U11 and below — see utils/compliance.
   if (match.kind === 'participation') {
     return `${match.team} played ${match.homeAway === 'home' ? 'at home' : 'away'}`;

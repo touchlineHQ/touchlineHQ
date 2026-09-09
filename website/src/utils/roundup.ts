@@ -529,12 +529,30 @@ function marker(match: RoundupMatch, emoji: boolean): string {
 }
 
 /** The match itself, without the marker or the kick-off prefix. */
-function matchBody(match: RoundupMatch): string {
-  if (match.kind === 'result') {
-    return `${match.team} ${match.goalsFor}–${match.goalsAgainst} ${match.opponent}`;
-  }
+/**
+ * The scoreline as the match was played: home team first, away second.
+ *
+ * A result row is stored from the club's own side, so rendering it in that
+ * order turns every away win into something that reads like a home one. Putting
+ * the home team first keeps the fact of where it was played — "Quorn Reserves
+ * 2–3 Robins" is a Robins away win — and the outcome is carried alongside, by
+ * the coloured dot in a message and the W/D/L badge on the page.
+ */
+export function scoreline(match: RoundupResultLine | RoundupDerbyLine): string {
   if (match.kind === 'derby') {
     return `${match.homeTeam} ${match.homeScore}–${match.awayScore} ${match.awayTeam}`;
+  }
+  const atHome = match.homeAway === 'home';
+  const home = atHome ? match.team : match.opponent;
+  const away = atHome ? match.opponent : match.team;
+  const homeScore = atHome ? match.goalsFor : match.goalsAgainst;
+  const awayScore = atHome ? match.goalsAgainst : match.goalsFor;
+  return `${home} ${homeScore}–${awayScore} ${away}`;
+}
+
+function matchBody(match: RoundupMatch): string {
+  if (match.kind === 'result' || match.kind === 'derby') {
+    return scoreline(match);
   }
   if (match.kind === 'participation') {
     // Naming the opposition or venue is exactly what the guidance forbids, so

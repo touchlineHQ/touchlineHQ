@@ -5,7 +5,7 @@ import {
   weeksWithMatches, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
   formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, unscoredReason,
   formatKickOff, formatKickOffLabel, unscoredMatches, participationMatches,
-  withParticipation, hasRecord, xWeightedLength,
+  withParticipation, hasRecord, scoreline, xWeightedLength,
 } from './roundup';
 
 const CLUB = 'East Leake';
@@ -320,6 +320,47 @@ describe('buildRoundup', () => {
     const quiet = buildRoundup(makeFeed(), '2026-10-05');
     expect(quiet.matches).toHaveLength(0);
     expect(quiet.summary.played).toBe(0);
+  });
+});
+
+describe('scoreline', () => {
+  const roundup = buildRoundup(makeFeed(), WEEK);
+  const line = (id: string) => {
+    const match = roundup.matches.find(m => m.id === id);
+    if (!match || (match.kind !== 'result' && match.kind !== 'derby')) {
+      throw new Error(`no scored match ${id}`);
+    }
+    return scoreline(match);
+  };
+
+  it('puts the home team first when the club was at home', () => {
+    expect(line('r1')).toBe('Blue U12 4–1 Ruddington Village U12');
+  });
+
+  it('puts the opposition first when the club was away', () => {
+    // r2 is an away draw: stored as goals_for 2, goals_against 2 from the
+    // club's side, and the scoreline still has to read as it was played.
+    expect(line('r2')).toBe('Keyworth United U13 2–2 Maroon U13');
+  });
+
+  it('keeps an away win reading as an away win', () => {
+    const feed = makeFeed();
+    feed.results = [makeResult({
+      id: 'away', date: '2026-09-01', time: '20:00', team: 'East Leake Robins',
+      opponent: 'Quorn Reserves', division: 'Division One', home_away: 'away',
+      home_score: 2, away_score: 3, goals_for: 3, goals_against: 2,
+    })];
+    const built = buildRoundup(feed, WEEK);
+    const match = built.matches[0];
+    expect(match.kind).toBe('result');
+    expect(scoreline(match as never)).toBe('Quorn Reserves 2–3 Robins');
+    // The outcome is carried alongside, not by the order of the names.
+    expect(match.kind === 'result' && match.outcome).toBe('W');
+    expect(formatWhatsApp(built)).toContain('🟢 Tue 8pm · Quorn Reserves 2–3 Robins');
+  });
+
+  it('leaves a derby in its own home/away order', () => {
+    expect(line('derby')).toBe('Blue U12 2–1 Greens U12');
   });
 });
 

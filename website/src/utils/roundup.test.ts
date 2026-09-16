@@ -5,11 +5,14 @@ import {
   weeksWithMatches, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
   formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, unscoredReason,
   formatKickOff, formatKickOffLabel, unscoredMatches, participationMatches,
-  withParticipation, hasRecord, scoreline, xWeightedLength,
+  withParticipation, fixtureMatches, withFixtures, hasRecord, scoreline, xWeightedLength,
 } from './roundup';
 
 const CLUB = 'East Leake';
 const WEEK = '2026-08-31'; // Mon 31 Aug – Sun 6 Sep 2026
+// Fixtures are upcoming or awaiting a result depending on the day the roundup is
+// built, so every test that cares says which day that is.
+const TODAY = '2026-09-01';
 
 function makeResult(over: Partial<LiveResult> & Pick<LiveResult, 'id' | 'date' | 'team'>): LiveResult {
   const homeAway = over.home_away ?? 'home';
@@ -120,7 +123,7 @@ function makeFeed(): ClubFeed {
         id: 'young', date: '2026-09-06', time: '12:00',
         team: 'East Leake Whites U9', division: 'U9 Sun Spring Div 3 Red', age_group: 'U9',
       }),
-      // Still to come — a roundup reports what was played.
+      // Still to be played — the feed says so, whatever the date reads.
       makeParticipation({
         id: 'upcoming', date: '2026-09-06', time: '15:00',
         team: 'East Leake Tigers U8', division: 'U8 Development', played: false,
@@ -221,8 +224,9 @@ describe('why a score is missing', () => {
 });
 
 describe('week selection', () => {
-  it('offers only weeks the club played in, newest first', () => {
-    expect(weeksWithMatches(makeFeed())).toEqual(['2026-08-31', '2026-08-24']);
+  it('offers every week with a match in it, played or not, newest first', () => {
+    expect(weeksWithMatches(makeFeed()))
+      .toEqual(['2026-09-14', '2026-09-07', '2026-08-31', '2026-08-24']);
   });
 
   it('counts participation weeks, so an all-U8 club still gets a week', () => {
@@ -238,9 +242,24 @@ describe('week selection', () => {
     expect(defaultWeek(makeFeed())).toBe('2026-08-31');
   });
 
-  it('has no week to offer for a club with no results', () => {
+  it('has no week to offer for a club with nothing at all', () => {
     const empty: ClubFeed = { club: CLUB, generated: '', fixtures: [], results: [] };
     expect(defaultWeek(empty)).toBeNull();
+  });
+
+  it('opens on the week in hand when nothing has been played yet', () => {
+    const preseason: ClubFeed = {
+      club: CLUB,
+      generated: new Date().toISOString(),
+      fixtures: [
+        makeFixture({ id: 'f2', date: '2026-09-20', team: 'East Leake Blue U10' }),
+        makeFixture({ id: 'f1', date: '2026-09-13', team: 'East Leake Blue U10' }),
+      ],
+      results: [],
+    };
+    expect(defaultWeek(preseason, '2026-09-16')).toBe('2026-09-14');
+    // Before a ball is kicked there is no week in hand, so it opens on the first.
+    expect(defaultWeek(preseason, '2026-09-01')).toBe('2026-09-07');
   });
 });
 
@@ -255,7 +274,7 @@ describe('buildRoundup', () => {
 
   it('puts every match in one list, in kick-off order', () => {
     expect(roundup.matches.map(m => m.id))
-      .toEqual(['r3', 'derby', 'r1', 'r2', 'young', 'friendly']);
+      .toEqual(['r3', 'derby', 'r1', 'r2', 'young', 'friendly', 'upcoming']);
   });
 
   it('takes participation games from the feed, skipping unplayed and other weeks', () => {
@@ -285,10 +304,11 @@ describe('buildRoundup', () => {
   });
 
   it('counts every match as played, including participation and derbies', () => {
-    const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
-    // r3, derby, r1, r2, young, friendly — the whole list.
-    expect(played).toBe(roundup.matches.length);
+    const { played, toCome, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
+    // r3, derby, r1, r2, young, friendly — everything but the unplayed fixture.
+    expect(played).toBe(roundup.matches.length - toCome);
     expect(played).toBe(6);
+    expect(toCome).toBe(1);
     // The record stays narrower: only matches with a result the club can claim.
     expect({ won, drawn, lost, goalsFor, goalsAgainst })
       .toEqual({ won: 1, drawn: 1, lost: 1, goalsFor: 6, goalsAgainst: 6 });
@@ -309,6 +329,13 @@ describe('buildRoundup', () => {
     expect(hasRecord(young.summary)).toBe(false);
   });
 
+  it('builds an empty roundup for a week with nothing in it', () => {
+    const quiet = buildRoundup(makeFeed(), '2026-10-05');
+    expect(quiet.matches).toHaveLength(0);
+    expect(quiet.summary.played).toBe(0);
+    expect(quiet.summary.toCome).toBe(0);
+  });
+
   it('flags a feed that has not refreshed recently', () => {
     const stale = makeFeed();
     stale.generated = '2026-09-01T06:00:00Z';
@@ -316,10 +343,144 @@ describe('buildRoundup', () => {
     expect(buildRoundup(makeFeed(), WEEK).stale).toBe(false);
   });
 
-  it('builds an empty roundup for a week with nothing in it', () => {
-    const quiet = buildRoundup(makeFeed(), '2026-10-05');
-    expect(quiet.matches).toHaveLength(0);
-    expect(quiet.summary.played).toBe(0);
+});
+
+describe('fixtures in the roundup', () => {
+  /** A week that is half played and half still to come. */
+  function makeMidweekFeed(): ClubFeed {
+    return {
+      club: CLUB,
+      generated: new Date().toISOString(),
+      fixtures: [
+        // Saturday has gone by with no result published.
+        makeFixture({
+          id: 'awaiting', date: '2026-08-31', time: '19:30', team: 'East Leake Robins',
+          opponent: 'Cotgrave Reserves', division: 'Division One', home_away: 'away',
+        }),
+        // Still to come.
+        makeFixture({
+          id: 'later', date: '2026-09-05', time: '10:00', team: 'East Leake Blue U12',
+          opponent: 'Ruddington Village U12', division: 'U12 Division 1',
+        }),
+        // U11 and below: no opposition, no venue.
+        makeFixture({
+          id: 'young', date: '2026-09-06', time: '10:00', team: 'East Leake Bantams U8',
+          opponent: 'Opposition', venue: '', division: 'U8 Saturday', home_away: 'away',
+          publication_restricted: true,
+        }),
+        // Two of this club's teams, so the feed holds the fixture from both sides.
+        makeFixture({
+          id: 'internal', date: '2026-09-05', time: '14:00', team: 'East Leake Blue U14',
+          opponent: 'East Leake Greens U14', home_team: 'East Leake Blue U14',
+          away_team: 'East Leake Greens U14', division: 'U14 Division 1',
+        }),
+        makeFixture({
+          id: 'internal', date: '2026-09-05', time: '14:00', team: 'East Leake Greens U14',
+          opponent: 'East Leake Blue U14', home_team: 'East Leake Blue U14',
+          away_team: 'East Leake Greens U14', division: 'U14 Division 1', home_away: 'away',
+        }),
+        // Already played and scored, so the result is what gets listed.
+        makeFixture({
+          id: 'r1', date: '2026-09-01', time: '10:00', team: 'East Leake Blue U12',
+          opponent: 'Keyworth United U12',
+        }),
+      ],
+      results: [
+        makeResult({
+          id: 'r1', date: '2026-09-01', time: '10:00', team: 'East Leake Blue U12',
+          opponent: 'Keyworth United U12',
+          home_score: 3, away_score: 0, goals_for: 3, goals_against: 0,
+        }),
+      ],
+    };
+  }
+
+  const roundup = buildRoundup(makeMidweekFeed(), WEEK, TODAY);
+
+  it('lists the whole week — results first, then what is still to come', () => {
+    expect(roundup.matches.map(m => m.id))
+      .toEqual(['awaiting', 'r1', 'later', 'internal', 'young']);
+  });
+
+  it('never lists a fixture whose result has already landed', () => {
+    expect(roundup.matches.filter(m => m.id === 'r1')).toHaveLength(1);
+    expect(roundup.matches.find(m => m.id === 'r1')?.kind).toBe('result');
+  });
+
+  it('drops a fixture the results carry under a different id', () => {
+    const feed = makeMidweekFeed();
+    feed.results[0].id = 'some-other-id';
+    const built = buildRoundup(feed, WEEK, TODAY);
+    expect(built.matches.filter(m => m.date === '2026-09-01')).toHaveLength(1);
+    expect(built.matches.find(m => m.date === '2026-09-01')?.kind).toBe('result');
+  });
+
+  it('separates what is still to come from what was played', () => {
+    expect(roundup.summary.played).toBe(1);
+    expect(roundup.summary.toCome).toBe(4);
+    expect(fixtureMatches(roundup).map(m => m.status))
+      .toEqual(['awaiting', 'upcoming', 'upcoming', 'upcoming']);
+  });
+
+  it('names a fixture home side first, as it will be played', () => {
+    const text = formatWhatsApp(roundup, { includeLink: false });
+    expect(text).toContain('📅 Sat 10am · Blue U12 vs Ruddington Village U12 (to play)');
+    expect(text).toContain('📅 Mon 7:30pm · Cotgrave Reserves vs Robins (result to come)');
+  });
+
+  it('renders a club-v-club fixture once, from the home side', () => {
+    const internal = roundup.matches.filter(m => m.id === 'internal');
+    expect(internal).toHaveLength(1);
+    expect(internal[0]).toMatchObject({
+      kind: 'fixture', homeTeam: 'Blue U14', awayTeam: 'Greens U14', homeAway: 'home',
+    });
+  });
+
+  it('names no opposition or venue for a U11-and-below fixture', () => {
+    const text = formatWhatsApp(roundup, { includeLink: false });
+    expect(text).toContain('📅 Sun 10am · Bantams U8 play away');
+    expect(text).not.toContain('Opposition');
+    expect(text).not.toContain('Lantern Lane');
+  });
+
+  it('treats a U11-and-below fixture whose day has gone as a game that was played', () => {
+    // No score is ever published at these ages, so it would sit in the fixture
+    // list for ever waiting for one.
+    const past = buildRoundup(makeMidweekFeed(), WEEK, '2026-09-07');
+    const young = past.matches.find(m => m.id === 'young');
+    expect(young).toMatchObject({ kind: 'participation', team: 'Bantams U8', homeAway: 'away' });
+    expect(formatWhatsApp(past, { includeLink: false }))
+      .toContain('🔵 Sun 10am · Bantams U8 played away');
+  });
+
+  it('leads with the fixtures when the week has not been played yet', () => {
+    const feed = makeMidweekFeed();
+    feed.results = [];
+    feed.fixtures = feed.fixtures.filter(f => f.id !== 'r1');
+    const ahead = buildRoundup(feed, WEEK, '2026-08-30');
+    expect(ahead.summary.played).toBe(0);
+    expect(ahead.summary.toCome).toBe(4);
+    expect(formatWhatsApp(ahead, { includeLink: false })).toContain('📊 4 to come');
+    expect(formatEmailBody(ahead, { includeLink: false }))
+      .toContain('Fixtures, Mon 31 Aug – Sun 6 Sep');
+    expect(formatEmailBody(ahead, { includeLink: false })).toContain('Still to come: 4');
+  });
+
+  it('counts the still-to-come games in the record line', () => {
+    expect(formatWhatsApp(roundup, { includeLink: false }))
+      .toContain('Played 1 · W1 D0 L0 · GF 3 GA 0 · 4 to come');
+    expect(formatEmailBody(roundup, { includeLink: false })).toContain('Still to come: 4');
+  });
+
+  it('drops fixtures from the list and the count when they are turned off', () => {
+    const without = withFixtures(roundup, false);
+    expect(without.matches.map(m => m.id)).toEqual(['r1']);
+    expect(without.summary.toCome).toBe(0);
+    expect(without.summary.played).toBe(1);
+    const text = formatWhatsApp(without, { includeLink: false });
+    expect(text).not.toContain('to play');
+    expect(text).toContain('Played 1 · W1 D0 L0 · GF 3 GA 0');
+    expect(text).not.toContain('to come');
   });
 });
 
@@ -388,11 +549,13 @@ describe('message formats', () => {
     expect(text).not.toContain('http');
   });
 
-  it('reports results only, never upcoming fixtures', () => {
+  it('keeps the week\'s fixtures in the list, and the weeks either side out of it', () => {
     const text = formatWhatsApp(roundup, { link });
-    expect(text).not.toContain('Next up');
+    // The U8 game the feed has not marked played yet is this week's, so it is in.
+    expect(text).toContain('📅 Sun 3pm · Tigers U8 play at home');
+    // f1 and f2 belong to the following week and must not be dragged in.
     expect(text).not.toContain('Bingham Town U10');
-    expect(formatEmailBody(roundup, { link })).not.toContain("Next week's fixtures");
+    expect(text).not.toContain('Cotgrave Colts U12');
   });
 
   it('keeps the social variant inside the character limit', () => {

@@ -134,15 +134,46 @@ export interface RoundupParticipationLine {
   ageGroup: string | null;
 }
 
-/** Every match the club played in the week, scored or not. */
+/**
+ * A match in the week with no result: one still to be played, or one whose date
+ * has passed with nothing published.
+ *
+ * Full-Time keeps a match on the fixture list until a score is entered, so a
+ * fixture whose date has gone by is either postponed or simply not entered yet.
+ * The feed cannot tell those apart, so neither does this line — it says only
+ * that no result has been published.
+ */
+export interface RoundupFixtureLine {
+  kind: 'fixture';
+  id: string;
+  date: string;
+  time: string;
+  /** Home side first, as the match is listed. Null when the sides must not be named. */
+  homeTeam: string | null;
+  awayTeam: string | null;
+  /** The club's own side, which is always safe to name. */
+  team: string;
+  homeAway: 'home' | 'away';
+  division: string;
+  /** `upcoming` — still to be played. `awaiting` — the date has passed, no result. */
+  status: 'upcoming' | 'awaiting';
+  /** U11 and below: no opposition or venue, so only this club's team is named. */
+  restricted: boolean;
+}
+
+/** Every match in the club's week — played or still to come. */
 export type RoundupMatch =
   | RoundupResultLine
   | RoundupDerbyLine
   | RoundupUnscoredLine
-  | RoundupParticipationLine;
+  | RoundupParticipationLine
+  | RoundupFixtureLine;
 
 export interface RoundupSummary {
+  /** Matches that were played. Fixtures still to come are counted separately. */
   played: number;
+  /** Matches in the week with no result published — still to play, or awaiting one. */
+  toCome: number;
   won: number;
   drawn: number;
   lost: number;
@@ -156,7 +187,10 @@ export interface Roundup {
   weekStart: string;
   /** Sunday of the roundup week, "YYYY-MM-DD". */
   weekEnd: string;
-  /** One chronological list — scored and unscored together, in kick-off order. */
+  /**
+   * One chronological list covering the whole week — results, scoreless matches
+   * and the fixtures still to come, all in kick-off order.
+   */
   matches: RoundupMatch[];
   summary: RoundupSummary;
   generated: string;
@@ -186,13 +220,29 @@ export function participationMatches(roundup: Roundup): RoundupParticipationLine
   );
 }
 
+export function fixtureMatches(roundup: Roundup): RoundupFixtureLine[] {
+  return roundup.matches.filter((m): m is RoundupFixtureLine => m.kind === 'fixture');
+}
+
 /**
  * The roundup with participation games kept or dropped. The summary is rebuilt
  * either way so the record can never describe matches the message doesn't show.
  */
 export function withParticipation(roundup: Roundup, include: boolean): Roundup {
+  return withoutKind(roundup, 'participation', include);
+}
+
+/**
+ * The roundup with the week's unplayed fixtures kept or dropped — a roundup sent
+ * mid-week carries them, one sent on Sunday night has nothing left to list.
+ */
+export function withFixtures(roundup: Roundup, include: boolean): Roundup {
+  return withoutKind(roundup, 'fixture', include);
+}
+
+function withoutKind(roundup: Roundup, kind: RoundupMatch['kind'], include: boolean): Roundup {
   if (include) return roundup;
-  const matches = roundup.matches.filter(m => m.kind !== 'participation');
+  const matches = roundup.matches.filter(m => m.kind !== kind);
   return { ...roundup, matches, summary: summarise(matches) };
 }
 
@@ -223,6 +273,11 @@ export function mondayOf(iso: string): string {
   const date = parseIso(iso);
   const dayOfWeek = date.getUTCDay();
   return addDays(iso, dayOfWeek === 0 ? -6 : 1 - dayOfWeek);
+}
+
+/** Today as the feed writes dates: "YYYY-MM-DD", UTC, matching the rest of this module. */
+export function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 /** "Sat 5 Sep" — built by hand so it doesn't drift with locale or timezone. */
@@ -320,22 +375,44 @@ function byKickOff(a: { date: string; time: string }, b: { date: string; time: s
 }
 
 /**
- * Mondays of every week the club played in, newest first. Participation games
- * count: a club with only U11-and-below teams has no scored results at all, and
- * without them it would be offered no weeks to look at.
+ * Mondays of every week the club has a match in, played or not, newest first.
+ *
+ * Fixtures count as well as results: a roundup covers the whole week, so a week
+ * whose games are still to come is one the club can be offered — and a club at
+ * the start of its season has nothing else to show.
  */
 export function weeksWithMatches(feed: ClubFeed): string[] {
+  const weeks = new Set(weeksPlayed(feed));
+  for (const fixture of feed.fixtures ?? []) weeks.add(mondayOf(fixture.date));
+  for (const entry of feed.participation ?? []) weeks.add(mondayOf(entry.date));
+  return [...weeks].sort((a, b) => b.localeCompare(a));
+}
+
+/** Mondays of the weeks the club actually played in, newest first. */
+function weeksPlayed(feed: ClubFeed): string[] {
   const weeks = new Set<string>();
-  for (const result of feed.results) weeks.add(mondayOf(result.date));
+  for (const result of feed.results ?? []) weeks.add(mondayOf(result.date));
   for (const entry of feed.participation ?? []) {
     if (entry.played !== false) weeks.add(mondayOf(entry.date));
   }
   return [...weeks].sort((a, b) => b.localeCompare(a));
 }
 
-/** The week the roundup opens on: the most recent one the club played in. */
-export function defaultWeek(feed: ClubFeed): string | null {
-  return weeksWithMatches(feed)[0] ?? null;
+/**
+ * The week the roundup opens on: the most recent one the club played in, which
+ * is the week anyone writing up "the weekend" means.
+ *
+ * A club with no results yet — a season that has just started, or one whose
+ * league has published nothing — falls back to the week in hand, and to its
+ * first week of fixtures if even that is still to come. Opening on the newest
+ * week in the feed would land months ahead of where anyone is standing.
+ */
+export function defaultWeek(feed: ClubFeed, today = todayIso()): string | null {
+  const played = weeksPlayed(feed)[0];
+  if (played) return played;
+  const weeks = weeksWithMatches(feed);
+  const thisWeek = mondayOf(today);
+  return weeks.find(week => week <= thisWeek) ?? weeks[weeks.length - 1] ?? null;
 }
 
 function isStale(generated: string): boolean {
@@ -344,13 +421,23 @@ function isStale(generated: string): boolean {
   return Date.now() - stamp > STALE_AFTER_HOURS * 60 * 60 * 1000;
 }
 
-export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
+export function buildRoundup(feed: ClubFeed, weekStart: string, today = todayIso()): Roundup {
   const club = feed.club;
   const strip = (name: string) => stripClubPrefix(name, club);
   const matches: RoundupMatch[] = [];
   // Ids already rendered as participation, so a redacted result row and the
   // feed's own entry for the same match cannot both be listed.
   const participationIds = new Set<string>();
+  // Every match already in the list. A fixture whose result has landed is in
+  // both feed arrays, and Full-Time keeps it on the fixture list until someone
+  // enters the score, so the fixtures pass skips what is already accounted for.
+  const listed = new Set<string>();
+  const markListed = (row: { id: string; date: string; time: string; team: string }) => {
+    listed.add(row.id);
+    // Belt and braces: the two arrays are keyed independently upstream, so fall
+    // back to the match itself rather than trusting the ids to agree.
+    listed.add(matchKey(row));
+  };
 
   for (const group of groupById(feed.results.filter(r => inWeek(r.date, weekStart)))) {
     const [row] = group;
@@ -361,6 +448,7 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     // match still happened.
     if (isRowRestricted(row)) {
       participationIds.add(row.id);
+      markListed(row);
       matches.push(toParticipation({
         id: row.id,
         date: row.date,
@@ -372,6 +460,8 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
       }, strip));
       continue;
     }
+
+    markListed(row);
 
     if (group.length > 1) {
       // Both sides belong to this club. Use the neutral home/away scores rather
@@ -416,11 +506,51 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
 
   for (const entry of feed.participation ?? []) {
     if (!inWeek(entry.date, weekStart)) continue;
-    // `played: false` marks one still to come; a roundup reports what happened.
-    if (entry.played === false) continue;
     if (participationIds.has(entry.id)) continue;
     participationIds.add(entry.id);
-    matches.push(toParticipation(entry, strip));
+    markListed(entry);
+    // `played: false` is the feed saying this one has not been played yet, so
+    // it is listed as a fixture rather than as a game the team turned out for.
+    matches.push(entry.played === false
+      ? toRestrictedFixture(entry, 'upcoming', strip)
+      : toParticipation(entry, strip));
+  }
+
+  for (const group of groupById((feed.fixtures ?? []).filter(f => inWeek(f.date, weekStart)))) {
+    const [row] = group;
+    if (listed.has(row.id) || listed.has(matchKey(row))) continue;
+    markListed(row);
+    const status: FixtureStatus = row.date >= today ? 'upcoming' : 'awaiting';
+
+    // U11 and below carry no opposition, venue or score. Once such a fixture's
+    // date has gone by there is no result coming — the FA guidance means one is
+    // never published — so it joins the week as a participation game instead of
+    // sitting in the list waiting for a score that will not arrive.
+    if (isRowRestricted(row)) {
+      if (status === 'awaiting') {
+        matches.push(toParticipation({ ...row, age_group: null }, strip));
+        continue;
+      }
+      matches.push(toRestrictedFixture(row, status, strip));
+      continue;
+    }
+
+    // Two of this club's teams playing each other: the feed holds the fixture
+    // from both sides, so name it neutrally, home side first.
+    const internal = group.length > 1;
+    matches.push({
+      kind: 'fixture',
+      id: row.id,
+      date: row.date,
+      time: row.time,
+      homeTeam: strip(row.home_team),
+      awayTeam: strip(row.away_team),
+      team: strip(internal ? row.home_team : row.team),
+      homeAway: internal ? 'home' : row.home_away,
+      division: row.division,
+      status,
+      restricted: false,
+    });
   }
 
   matches.sort(byKickOff);
@@ -434,6 +564,34 @@ export function buildRoundup(feed: ClubFeed, weekStart: string): Roundup {
     generated: feed.generated,
     stale: isStale(feed.generated),
   };
+}
+
+type FixtureStatus = RoundupFixtureLine['status'];
+
+/** A fixture for a U11-and-below team: this club's side, and nothing else. */
+function toRestrictedFixture(
+  row: Pick<ParticipationEntry, 'id' | 'date' | 'time' | 'team' | 'home_away' | 'division'>,
+  status: FixtureStatus,
+  strip: (name: string) => string,
+): RoundupFixtureLine {
+  return {
+    kind: 'fixture',
+    id: row.id,
+    date: row.date,
+    time: row.time,
+    homeTeam: null,
+    awayTeam: null,
+    team: strip(row.team),
+    homeAway: row.home_away,
+    division: row.division,
+    status,
+    restricted: true,
+  };
+}
+
+/** Identifies a match independently of the id the feed gave it. */
+function matchKey(row: { date: string; time: string; team: string }): string {
+  return `${row.date}|${row.time}|${row.team.toLowerCase()}`;
 }
 
 function toParticipation(
@@ -471,10 +629,11 @@ function toUnscored(
 }
 
 /**
- * Played counts every match in the roundup — participation games, friendlies
- * and club-v-club derbies included. A club that turned out eight times played
- * eight games, whether or not a score was ever recorded, and the point of the
- * headline is to say how busy the weekend was.
+ * Played counts every match the club turned out for — participation games,
+ * friendlies and club-v-club derbies included. A club that turned out eight
+ * times played eight games, whether or not a score was ever recorded, and the
+ * point of the headline is to say how busy the weekend was. Fixtures still to
+ * come are counted apart from it: they have not been played.
  *
  * W/D/L and goals stay narrower, over matches with a result the club can claim
  * as its own: a derby is simultaneously a win and a loss for the club, and the
@@ -483,8 +642,11 @@ function toUnscored(
  * would be the same number.
  */
 function summarise(matches: RoundupMatch[]): RoundupSummary {
+  const toCome = matches.filter(match => match.kind === 'fixture').length;
   const summary: RoundupSummary = {
-    played: matches.length, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0,
+    played: matches.length - toCome,
+    toCome,
+    won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0,
   };
   for (const match of matches) {
     if (match.kind !== 'result') continue;
@@ -509,6 +671,7 @@ export function hasRecord(summary: RoundupSummary): boolean {
 const OUTCOME_EMOJI: Record<'W' | 'D' | 'L', string> = { W: '🟢', D: '🟡', L: '🔴' };
 const DERBY_EMOJI = '⚪';
 const UNSCORED_EMOJI = '🔵';
+const FIXTURE_EMOJI = '📅';
 
 /** The span the matches actually cover, which reads better than the full week. */
 function matchRange(roundup: Roundup): string {
@@ -525,6 +688,7 @@ function marker(match: RoundupMatch, emoji: boolean): string {
   // A derby and a scoreless match both read unambiguously without emoji — the
   // derby from its neutral scoreline, the others from having no score at all.
   if (match.kind === 'derby') return emoji ? `${DERBY_EMOJI} ` : '';
+  if (match.kind === 'fixture') return emoji ? `${FIXTURE_EMOJI} ` : '';
   return emoji ? `${UNSCORED_EMOJI} ` : '';
 }
 
@@ -559,8 +723,22 @@ function matchBody(match: RoundupMatch): string {
     // the line reports only that this team played, and where they travelled.
     return `${match.team} played ${match.homeAway === 'home' ? 'at home' : 'away'}`;
   }
+  if (match.kind === 'fixture') return fixtureBody(match);
   const suffix = match.reason === 'friendly' ? ' (friendly)' : '';
   return `${match.team} vs ${match.opponent}${suffix}`;
+}
+
+/**
+ * A fixture with no result. The status is spelled out rather than left to the
+ * calendar emoji, so the line still reads as a fixture with emoji turned off.
+ */
+function fixtureBody(match: RoundupFixtureLine): string {
+  if (match.restricted) {
+    // Same guidance as a participation line: this club's team and nothing else.
+    return `${match.team} play ${match.homeAway === 'home' ? 'at home' : 'away'}`;
+  }
+  const suffix = match.status === 'upcoming' ? ' (to play)' : ' (result to come)';
+  return `${match.homeTeam} vs ${match.awayTeam}${suffix}`;
 }
 
 /** "🟢 Sun 10am · Blue U10 4–1 Ruddington Village U10" */
@@ -585,11 +763,15 @@ function unscoredNote(roundup: Roundup, emoji: boolean): string | null {
 }
 
 function summaryLine(summary: RoundupSummary): string {
-  const { played, won, drawn, lost, goalsFor, goalsAgainst } = summary;
+  const { played, toCome, won, drawn, lost, goalsFor, goalsAgainst } = summary;
+  const tail = toCome > 0 ? ` · ${toCome} to come` : '';
+  // Mid-week, before a ball has been kicked, there is nothing to report but the
+  // fixtures themselves — "Played 0" would be a strange way to open.
+  if (played === 0) return toCome > 0 ? `${toCome} to come` : 'Played 0';
   // A week of nothing but participation games has no record to report; W0 D0 L0
   // would read as three defeats-worth of nothing rather than as "not scored".
-  if (!hasRecord(summary)) return `Played ${played}`;
-  return `Played ${played} · W${won} D${drawn} L${lost} · GF ${goalsFor} GA ${goalsAgainst}`;
+  if (!hasRecord(summary)) return `Played ${played}${tail}`;
+  return `Played ${played} · W${won} D${drawn} L${lost} · GF ${goalsFor} GA ${goalsAgainst}${tail}`;
 }
 
 export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): string {
@@ -600,11 +782,8 @@ export function formatWhatsApp(roundup: Roundup, options: FormatOptions = {}): s
     `${emoji ? '⚽ ' : ''}${roundup.club} — Weekly Roundup\n${matchRange(roundup)}`,
   );
 
-  if (roundup.summary.played > 0) {
-    blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
-  }
-
   if (roundup.matches.length > 0) {
+    blocks.push(`${emoji ? '📊 ' : ''}${summaryLine(roundup.summary)}`);
     blocks.push(roundup.matches.map(match => matchLine(match, emoji)).join('\n'));
   } else {
     blocks.push('No results published for this week.');
@@ -640,11 +819,14 @@ export function formatSocial(roundup: Roundup, options: FormatOptions = {}): Soc
   const { summary } = roundup;
 
   const header = `${emoji ? '⚽ ' : ''}${roundup.club} weekend roundup`;
-  const record = summary.played === 0
-    ? ''
-    : hasRecord(summary)
-      ? `Played ${summary.played} · W${summary.won} D${summary.drawn} L${summary.lost}`
-      : `Played ${summary.played}`;
+  // Goals are dropped here; everything else reads as it does on the page.
+  const played = hasRecord(summary)
+    ? `Played ${summary.played} · W${summary.won} D${summary.drawn} L${summary.lost}`
+    : `Played ${summary.played}`;
+  const record = [
+    summary.played > 0 ? played : '',
+    summary.toCome > 0 ? `${summary.toCome} to come` : '',
+  ].filter(Boolean).join(' · ');
   const tags = [clubHashtag(roundup.club), '#GrassrootsFootball'].filter(Boolean).join(' ');
   const tail = includeLink && link ? link : '';
 
@@ -689,14 +871,23 @@ export function formatEmailBody(roundup: Roundup, options: FormatOptions = {}): 
   const { includeLink = true, emoji = false, link = '' } = options;
   const blocks: string[] = [];
 
-  blocks.push(`Results, ${matchRange(roundup)}`);
+  const { played, toCome, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
+  // A week still to be played is a fixture list, not a results email.
+  const heading = played === 0 && toCome > 0
+    ? 'Fixtures'
+    : toCome > 0 ? 'Results and fixtures' : 'Results';
+  blocks.push(`${heading}, ${matchRange(roundup)}`);
 
-  if (roundup.summary.played > 0) {
-    const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
-    blocks.push(hasRecord(roundup.summary)
-      ? `Played ${played}  Won ${won}  Drawn ${drawn}  Lost ${lost}\n`
-        + `Goals for ${goalsFor}, against ${goalsAgainst}`
-      : `Played ${played}`);
+  if (played > 0 || toCome > 0) {
+    const lines: string[] = [];
+    if (played > 0) {
+      lines.push(hasRecord(roundup.summary)
+        ? `Played ${played}  Won ${won}  Drawn ${drawn}  Lost ${lost}\n`
+          + `Goals for ${goalsFor}, against ${goalsAgainst}`
+        : `Played ${played}`);
+    }
+    if (toCome > 0) lines.push(`Still to come: ${toCome}`);
+    blocks.push(lines.join('\n'));
   }
 
   if (roundup.matches.length > 0) {

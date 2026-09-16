@@ -78,8 +78,9 @@ export const RoundupPage = () => {
                 </Stack>
               </Stack>
               <Text size="lg" c="dimmed" ta="center" maw={800} mx="auto">
-                Find your club and get every team's result from the weekend written up as a message —
-                for the team WhatsApp group, your club socials, or the parents' mailing list.
+                Find your club and get the whole week written up as a message — every team's
+                result, and the games still to come — for the team WhatsApp group, your club
+                socials, or the parents' mailing list.
                 Free for every grassroots club.
               </Text>
             </Box>

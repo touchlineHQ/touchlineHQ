@@ -14,7 +14,8 @@ import type { ClubFeed } from '../types';
 import {
   buildRoundup, defaultWeek, weeksWithMatches, addDays, formatDayRange, formatKickOffLabel,
   formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, unscoredMatches,
-  participationMatches, withParticipation, hasRecord, scoreline, SOCIAL_LIMIT,
+  participationMatches, withParticipation, fixtureMatches, withFixtures, hasRecord,
+  scoreline, SOCIAL_LIMIT,
 } from '../utils/roundup';
 import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
 import { RESTRICTED_RESULTS_NOTICE } from '../utils/compliance';
@@ -39,6 +40,11 @@ function MatchBadge({ match }: { match: RoundupMatch }) {
   if (match.kind === 'participation') {
     return <Badge color="blue" variant="light" size="xs" radius="sm">Participation</Badge>;
   }
+  if (match.kind === 'fixture') {
+    return match.status === 'upcoming'
+      ? <Badge color="gray" variant="outline" size="xs" radius="sm">To play</Badge>
+      : <Badge color="gray" variant="outline" size="xs" radius="sm">Result to come</Badge>;
+  }
   return match.reason === 'friendly'
     ? <Badge color="blue" variant="filled" size="xs" radius="sm">Friendly</Badge>
     : <Badge color="blue" variant="light" size="xs" radius="sm">No score</Badge>;
@@ -50,6 +56,12 @@ function matchText(match: RoundupMatch): string {
   // No opposition or venue for U11 and below — see utils/compliance.
   if (match.kind === 'participation') {
     return `${match.team} played ${match.homeAway === 'home' ? 'at home' : 'away'}`;
+  }
+  // The badge carries the status, so the row itself needs no "(to play)" suffix.
+  if (match.kind === 'fixture') {
+    return match.restricted
+      ? `${match.team} play ${match.homeAway === 'home' ? 'at home' : 'away'}`
+      : `${match.homeTeam} vs ${match.awayTeam}`;
   }
   return `${match.team} vs ${match.opponent}`;
 }
@@ -79,8 +91,8 @@ function unscoredExplanation(lines: RoundupUnscoredLine[]): string {
 }
 
 function SummaryChips({ roundup }: { roundup: Roundup }) {
-  const { played, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
-  if (played === 0) return null;
+  const { played, toCome, won, drawn, lost, goalsFor, goalsAgainst } = roundup.summary;
+  if (played === 0 && toCome === 0) return null;
   // "Played" spelled out: it counts every match, so it is not the P of a league
   // table, where P would equal W + D + L.
   return (
@@ -90,6 +102,12 @@ function SummaryChips({ roundup }: { roundup: Roundup }) {
           <Text size="xs" c="dimmed" fw={500}>Played</Text>
           <Text size="sm" fw={700}>{played}</Text>
         </Group>
+        {toCome > 0 && (
+          <Group gap="xs">
+            <Text size="xs" c="dimmed" fw={500}>To come</Text>
+            <Text size="sm" fw={700}>{toCome}</Text>
+          </Group>
+        )}
         {hasRecord(roundup.summary) && (
           <>
             <Group gap="xs">
@@ -125,6 +143,7 @@ export function ClubRoundup() {
   const [format, setFormat] = useState<Format>('whatsapp');
   const [includeLink, setIncludeLink] = useState(true);
   const [includeParticipation, setIncludeParticipation] = useState(true);
+  const [includeFixtures, setIncludeFixtures] = useState(true);
   const [emoji, setEmoji] = useState(true);
 
   const [copied, setCopied] = useState(false);
@@ -227,11 +246,19 @@ export function ClubRoundup() {
     [fullRoundup],
   );
 
-  // Everything below reads this, so hiding participation games takes them out
-  // of the list, the message and the record together.
+  /** How many of the week's matches are still without a result, shown or not. */
+  const fixtureCount = useMemo(
+    () => (fullRoundup ? fixtureMatches(fullRoundup).length : 0),
+    [fullRoundup],
+  );
+
+  // Everything below reads this, so hiding participation games or fixtures takes
+  // them out of the list, the message and the record together.
   const roundup = useMemo(
-    () => (fullRoundup ? withParticipation(fullRoundup, includeParticipation) : null),
-    [fullRoundup, includeParticipation],
+    () => (fullRoundup
+      ? withFixtures(withParticipation(fullRoundup, includeParticipation), includeFixtures)
+      : null),
+    [fullRoundup, includeParticipation, includeFixtures],
   );
 
   const unscored = useMemo(() => (roundup ? unscoredMatches(roundup) : []), [roundup]);
@@ -272,7 +299,7 @@ export function ClubRoundup() {
   useEffect(() => {
     setCopied(false);
     setCopyFailed(false);
-  }, [format, includeLink, emoji, week, includeParticipation]);
+  }, [format, includeLink, emoji, week, includeParticipation, includeFixtures]);
 
   const copy = async () => {
     if (!message) return;
@@ -364,7 +391,7 @@ export function ClubRoundup() {
               <Text fw={600} size="sm">This week's matches</Text>
             </Group>
             {roundup.matches.length === 0 ? (
-              <Text size="sm" c="dimmed">No results published for this week.</Text>
+              <Text size="sm" c="dimmed">Nothing published for this week.</Text>
             ) : (
               roundup.matches.map(match => <MatchRow key={match.id} match={match} />)
             )}
@@ -378,6 +405,11 @@ export function ClubRoundup() {
               <Text size="xs" c="dimmed">
                 {participationCount} participation game{participationCount === 1 ? '' : 's'} hidden
                 (Under-11 and below).
+              </Text>
+            )}
+            {!includeFixtures && fixtureCount > 0 && (
+              <Text size="xs" c="dimmed">
+                {fixtureCount} fixture{fixtureCount === 1 ? '' : 's'} still to come hidden.
               </Text>
             )}
           </Stack>
@@ -408,6 +440,14 @@ export function ClubRoundup() {
                   label={`Participation games (${participationCount})`}
                   checked={includeParticipation}
                   onChange={e => setIncludeParticipation(e.currentTarget.checked)}
+                  size="sm"
+                />
+              )}
+              {fixtureCount > 0 && (
+                <Switch
+                  label={`Fixtures still to come (${fixtureCount})`}
+                  checked={includeFixtures}
+                  onChange={e => setIncludeFixtures(e.currentTarget.checked)}
                   size="sm"
                 />
               )}
@@ -529,9 +569,9 @@ export function ClubRoundup() {
       )}
 
       {feed && !roundup && !loadingFeed && (
-        <Alert icon={<IconAlertCircle size={16} />} color="blue" title="No results yet">
-          {selectedEntry?.name} has no published results to round up yet. Check back after the next
-          round of fixtures.
+        <Alert icon={<IconAlertCircle size={16} />} color="blue" title="Nothing to round up yet">
+          {selectedEntry?.name} has no results or fixtures to round up yet. Check back once the
+          league publishes its next round of fixtures.
         </Alert>
       )}
     </Stack>

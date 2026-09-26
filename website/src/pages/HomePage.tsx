@@ -1,5 +1,5 @@
 import { Title, Text, Button, Group, SimpleGrid, Paper, ThemeIcon, Stack, Container, Anchor, List, Box, Flex, Badge, Image } from '@mantine/core';
-import { IconCheck, IconBrandGithub, IconCalendar, IconCode, IconMail, IconBrandGoogle, IconCloud, IconDeviceDesktop, IconUsers, IconShield, IconCreditCard, IconBrandOpenSource, IconCalendarPlus } from '@tabler/icons-react';
+import { IconCheck, IconBrandGithub, IconCalendar, IconCode, IconMail, IconBrandGoogle, IconCloud, IconDeviceDesktop, IconUsers, IconShield, IconCreditCard, IconBrandOpenSource, IconCalendarPlus, IconLayoutKanban } from '@tabler/icons-react';
 import { useMediaQuery } from '@mantine/hooks';
 import { Link } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
@@ -107,7 +107,6 @@ export const HomePage = ({ data }: Props) => {
               </Group>
             </Stack>
             <Box style={{ flex: 1, minWidth: 280, position: 'relative' }}>
-              {/* Logo positioned with dashboard cards */}
               {isSmall && (
                 <Box style={{ position: 'absolute', top: '-60px', right: '20px', zIndex: 4 }}>
                   <Image src={`${import.meta.env.BASE_URL}images/logo.png`} alt={`${club.name} logo`} h={140} w="auto" />
@@ -167,7 +166,6 @@ export const HomePage = ({ data }: Props) => {
             </Box>
           </Flex>
         </Container>
-        {/* Background pattern */}
         <Box
           style={{
             position: 'absolute',
@@ -181,8 +179,7 @@ export const HomePage = ({ data }: Props) => {
         />
       </Box>
 
-      {/* Features Section */}
-       <Box id="features" py="xl" style={{ background: 'linear-gradient(to bottom, #ffffff 0%, #f7fdf9 100%)', borderRadius: 'lg' }}>
+      <Box id="features" py="xl" style={{ background: 'linear-gradient(to bottom, #ffffff 0%, #f7fdf9 100%)', borderRadius: 'lg' }}>
         <Container size="lg">
           <Stack gap="xl">
             <div>
@@ -235,8 +232,7 @@ export const HomePage = ({ data }: Props) => {
         </Container>
       </Box>
 
-      {/* Treasurer's Tool */}
-       <Box id="treasurer" py="xl" style={{ background: 'linear-gradient(135deg, #1a2332 0%, #273347 100%)', borderRadius: 'lg' }}>
+      <Box id="treasurer" py="xl" style={{ background: 'linear-gradient(135deg, #1a2332 0%, #273347 100%)', borderRadius: 'lg' }}>
         <Container size="lg">
           <Stack gap="xl">
             <div>
@@ -256,8 +252,7 @@ export const HomePage = ({ data }: Props) => {
         </Container>
       </Box>
 
-      {/* Integration Demo */}
-       <Box id="demo" py="xl" style={{ background: 'linear-gradient(135deg, #f7fdf9 0%, #e6f9ee 100%)', borderRadius: 'lg' }}>
+      <Box id="demo" py="xl" style={{ background: 'linear-gradient(135deg, #f7fdf9 0%, #e6f9ee 100%)', borderRadius: 'lg' }}>
         <Container size="lg">
           <Stack gap="xl">
             <Group justify="center" gap="md" mb="md">
@@ -341,8 +336,7 @@ export const HomePage = ({ data }: Props) => {
         </Container>
       </Box>
 
-      {/* Open Source Section */}
-       <Box id="opensource" py="xl" style={{ background: 'transparent', borderRadius: 'lg' }}>
+      <Box id="opensource" py="xl" style={{ background: 'transparent', borderRadius: 'lg' }}>
         <Container size="lg">
           <Stack gap="xl">
             <div>
@@ -357,7 +351,7 @@ export const HomePage = ({ data }: Props) => {
                 Our platform is built on open-source projects that you can inspect, contribute to, and even self-host.
               </Text>
             </div>
-            <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+            <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="lg">
               {repos.map((repo, i) => (
                 <Paper 
                   key={i} 
@@ -379,7 +373,7 @@ export const HomePage = ({ data }: Props) => {
                     <Group justify="space-between">
                       <Group>
                        <ThemeIcon size={48} radius="lg" variant="light" color="green.5">
-                          <IconBrandGithub size={24} />
+                          {repo.url.includes('/projects/') ? <IconLayoutKanban size={24} /> : <IconBrandGithub size={24} />}
                         </ThemeIcon>
                         <Title order={3} size="h4">{repo.name}</Title>
                       </Group>
@@ -396,13 +390,14 @@ export const HomePage = ({ data }: Props) => {
                       component="a" 
                       href={repo.url}
                       target="_blank"
+                      rel="noopener noreferrer"
                       variant="outline"
                       color="green.6"
                       fullWidth
                       mt="sm"
                       radius="lg"
                     >
-                      View on GitHub
+                      {repo.url.includes('/projects/') ? 'View public board' : 'View on GitHub'}
                     </Button>
                   </Stack>
                 </Paper>
@@ -412,8 +407,7 @@ export const HomePage = ({ data }: Props) => {
         </Container>
       </Box>
 
-      {/* Contact Section */}
-       <Box id="contact" py="xl" style={{ background: 'linear-gradient(135deg, #1a2332 0%, #273347 100%)', borderRadius: 'lg' }}>
+      <Box id="contact" py="xl" style={{ background: 'linear-gradient(135deg, #1a2332 0%, #273347 100%)', borderRadius: 'lg' }}>
         <Container size="lg">
           <Stack gap="xl" align="center">
             <div>
@@ -441,10 +435,13 @@ export const HomePage = ({ data }: Props) => {
                 </Button>
                 <Group gap="lg" mt="md">
                   {contact.social.github && (
-                    <Anchor href={contact.social.github} target="_blank" c="gray.3" size="md" underline="never">
+                    <Anchor href={contact.social.github} target="_blank" rel="noopener noreferrer" c="gray.3" size="md" underline="never">
                       GitHub
                     </Anchor>
                   )}
+                  <Anchor href="https://github.com/orgs/touchlineHQ/projects/1" target="_blank" rel="noopener noreferrer" c="gray.3" size="md" underline="never">
+                    Roadmap
+                  </Anchor>
                   {contact.social.twitter && contact.social.twitter !== '#' && (
                     <Anchor href={contact.social.twitter} target="_blank" c="gray.3" size="md" underline="never">
                       Twitter

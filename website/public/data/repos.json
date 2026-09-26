@@ -24,5 +24,16 @@
       "Team name normalisation & club inference",
       "GitHub Pages hosting for feeds"
     ]
+  },
+  {
+    "name": "Public roadmap",
+    "description": "A public project board of planned issues, features and bugs across the touchlineHQ codebases.",
+    "url": "https://github.com/orgs/touchlineHQ/projects/1",
+    "tech": ["GitHub Projects"],
+    "features": [
+      "Open issues across every public repo",
+      "Priority and status visible to clubs",
+      "What is shipped and what is next"
+    ]
   }
 ]

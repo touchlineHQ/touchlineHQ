@@ -1,9 +1,11 @@
 import { AppShell, Group, Text, ActionIcon, Button, Burger, Drawer, Stack, Box, Image } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconBrandGithub, IconBrandTwitter, IconBrandLinkedin, IconHome, IconCalendar, IconMail, IconTrophy } from '@tabler/icons-react';
+import { IconBrandGithub, IconBrandTwitter, IconBrandLinkedin, IconHome, IconCalendar, IconMail, IconTrophy, IconLayoutKanban } from '@tabler/icons-react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { Club } from '../types';
+
+const PROJECT_BOARD_URL = 'https://github.com/orgs/touchlineHQ/projects/1';
 
 interface Props {
   club: Club;
@@ -12,7 +14,8 @@ interface Props {
 interface NavItem {
   label: string;
   icon: ReactNode;
-  to: string;
+  to?: string;
+  href?: string;
 }
 
 export const SiteHeader = ({ club }: Props) => {
@@ -22,6 +25,7 @@ export const SiteHeader = ({ club }: Props) => {
     { to: '/', label: 'Home', icon: <IconHome size={18} /> },
     { to: '/calendar', label: 'Team Calendars', icon: <IconCalendar size={18} /> },
     { to: '/roundup', label: 'Weekly Roundup', icon: <IconTrophy size={18} /> },
+    { href: PROJECT_BOARD_URL, label: 'Roadmap', icon: <IconLayoutKanban size={18} /> },
   ];
 
   const handleNavClick = () => {
@@ -37,8 +41,23 @@ export const SiteHeader = ({ club }: Props) => {
       justify: mobile ? ('start' as const) : undefined,
       fullWidth: mobile || undefined,
     };
+    if (item.href) {
+      return (
+        <Button
+          key={item.label}
+          {...shared}
+          component="a"
+          href={item.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={close}
+        >
+          {item.label}
+        </Button>
+      );
+    }
     return (
-      <Button key={item.label} {...shared} component={Link} to={item.to} onClick={handleNavClick}>
+      <Button key={item.label} {...shared} component={Link} to={item.to || '/'} onClick={handleNavClick}>
         {item.label}
       </Button>
     );

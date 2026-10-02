@@ -20,7 +20,7 @@ import {
 import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
 import { RESTRICTED_RESULTS_NOTICE } from '../utils/compliance';
 import { copyTextToClipboard } from '../utils/clipboard';
-import { latestRoundupUrl, roundupQuery, weeklyReminderUrl } from '../utils/reminder';
+import { latestRoundupUrl, roundupQuery, weeklyReminderFilename, weeklyReminderIcs } from '../utils/reminder';
 
 type Format = 'whatsapp' | 'social' | 'email';
 
@@ -513,10 +513,16 @@ export function ClubRoundup() {
               Email
             </Button>
             <Button
-              component="a"
-              href={weeklyReminderUrl(selectedEntry.name, selectedEntry.slug, new Date())}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={() => {
+                const ics = weeklyReminderIcs(selectedEntry.name, selectedEntry.slug, new Date());
+                const file = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+                const url = URL.createObjectURL(file);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = weeklyReminderFilename(selectedEntry.slug);
+                anchor.click();
+                URL.revokeObjectURL(url);
+              }}
               leftSection={<IconCalendar size={18} />}
               variant="outline"
               color="green.6"
@@ -540,7 +546,8 @@ export function ClubRoundup() {
           </Group>
 
           <Text size="xs" c="dimmed">
-            Weekly reminder is Tuesday at 7pm, UK time. It opens{' '}
+            Weekly reminder downloads a calendar file for Tuesday at 7pm, UK time.
+            Open it in Apple Calendar, Outlook, Google Calendar, or your mail app. It links to{' '}
             <Anchor href={latestRoundupUrl(selectedEntry.slug)} target="_blank" rel="noopener noreferrer">
               {latestRoundupUrl(selectedEntry.slug)}
             </Anchor>

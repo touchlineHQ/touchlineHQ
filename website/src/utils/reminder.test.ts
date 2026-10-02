@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { latestRoundupUrl, nextTuesdayEvening, roundupQuery, weeklyReminderUrl } from './reminder';
+import {
+  latestRoundupUrl, nextTuesdayEvening, roundupQuery, weeklyReminderFilename, weeklyReminderIcs,
+} from './reminder';
 
 describe('latestRoundupUrl', () => {
   it('names the club and does not pin a week', () => {
@@ -59,17 +61,29 @@ describe('nextTuesdayEvening', () => {
   });
 });
 
-describe('weeklyReminderUrl', () => {
-  it('repeats Tuesday at 7pm London and links the unpinned roundup', () => {
-    const url = new URL(weeklyReminderUrl('East Leake', 'east-leake', new Date('2026-10-02T18:01:00Z')));
-    expect(url.origin + url.pathname).toBe('https://calendar.google.com/calendar/render');
-    expect(url.searchParams.get('action')).toBe('TEMPLATE');
-    expect(url.searchParams.get('text')).toBe('East Leake weekly roundup');
-    expect(url.searchParams.get('dates')).toBe('20261006T190000/20261006T191500');
-    expect(url.searchParams.get('ctz')).toBe('Europe/London');
-    expect(url.searchParams.get('recur')).toBe('RRULE:FREQ=WEEKLY;BYDAY=TU');
-    expect(url.searchParams.get('location')).toBe('https://touchlinehq.co.uk/roundup?club=east-leake');
-    expect(url.searchParams.get('details')).toContain('https://touchlinehq.co.uk/roundup?club=east-leake');
-    expect(url.searchParams.get('location')).not.toContain('week=');
+describe('weeklyReminderIcs', () => {
+  const ics = weeklyReminderIcs('East Leake', 'east-leake', new Date('2026-10-02T18:01:00Z'));
+  const unfolded = ics.replace(/\r\n /g, '');
+
+  it('is a weekly Tuesday 7pm London event with a display alarm', () => {
+    expect(ics.endsWith('\r\n')).toBe(true);
+    expect(unfolded).toContain('BEGIN:VCALENDAR');
+    expect(unfolded).toContain('TZID:Europe/London');
+    expect(unfolded).toContain('DTSTART;TZID=Europe/London:20261006T190000');
+    expect(unfolded).toContain('DTEND;TZID=Europe/London:20261006T191500');
+    expect(unfolded).toContain('RRULE:FREQ=WEEKLY;BYDAY=TU');
+    expect(unfolded).toContain('SUMMARY:East Leake weekly roundup');
+    expect(unfolded).toContain('BEGIN:VALARM');
+    expect(unfolded).toContain('TRIGGER:PT0S');
+    expect(unfolded).toContain('UID:weekly-roundup-east-leake@touchlinehq.co.uk');
+  });
+
+  it('points at the latest roundup and does not pin a week', () => {
+    expect(unfolded).toContain('URL:https://touchlinehq.co.uk/roundup?club=east-leake');
+    expect(unfolded).not.toContain('week=');
+  });
+
+  it('names the download after the club', () => {
+    expect(weeklyReminderFilename('east-leake')).toBe('east-leake-weekly-roundup.ics');
   });
 });

@@ -95,20 +95,86 @@ function stamp(date: CivilDate, hour: number, minute: number): string {
 }
 
 /**
- * Google Calendar template for a 15-minute reminder, every Tuesday at 7pm
- * UK time. The event location is the unpinned roundup URL.
+ * An iCalendar reminder any calendar or mail app can open: Apple Calendar,
+ * Outlook, Google Calendar, Thunderbird. Tuesday at 7pm UK time, linking the
+ * club's latest roundup with no week pinned.
  */
-export function weeklyReminderUrl(clubName: string, slug: string, now: Date): string {
+export function weeklyReminderIcs(clubName: string, slug: string, now: Date): string {
   const date = nextTuesdayEvening(now);
   const page = latestRoundupUrl(slug);
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: `${clubName} weekly roundup`,
-    dates: `${stamp(date, 19, 0)}/${stamp(date, 19, 15)}`,
-    ctz: 'Europe/London',
-    recur: 'RRULE:FREQ=WEEKLY;BYDAY=TU',
-    details: `Open the latest roundup. The link has no week, so it always shows the most recent results.\n${page}`,
-    location: page,
-  });
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  const summary = `${clubName} weekly roundup`;
+  const description = [
+    'Open the latest roundup. The link has no week, so it always shows the most recent results.',
+    page,
+  ].join('\n');
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//touchlineHQ//Weekly Roundup//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VTIMEZONE',
+    'TZID:Europe/London',
+    'BEGIN:DAYLIGHT',
+    'TZOFFSETFROM:+0000',
+    'TZOFFSETTO:+0100',
+    'TZNAME:BST',
+    'DTSTART:19700329T010000',
+    'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU',
+    'END:DAYLIGHT',
+    'BEGIN:STANDARD',
+    'TZOFFSETFROM:+0100',
+    'TZOFFSETTO:+0000',
+    'TZNAME:GMT',
+    'DTSTART:19701025T020000',
+    'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU',
+    'END:STANDARD',
+    'END:VTIMEZONE',
+    'BEGIN:VEVENT',
+    `UID:weekly-roundup-${slug}@touchlinehq.co.uk`,
+    `DTSTAMP:${utcStamp(now)}`,
+    `DTSTART;TZID=Europe/London:${stamp(date, 19, 0)}`,
+    `DTEND;TZID=Europe/London:${stamp(date, 19, 15)}`,
+    'RRULE:FREQ=WEEKLY;BYDAY=TU',
+    `SUMMARY:${icsText(summary)}`,
+    `DESCRIPTION:${icsText(description)}`,
+    `URL:${page}`,
+    `LOCATION:${page}`,
+    'BEGIN:VALARM',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:${icsText(summary)}`,
+    'TRIGGER:PT0S',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ];
+  return lines.map(foldIcsLine).join('\r\n') + '\r\n';
+}
+
+export function weeklyReminderFilename(slug: string): string {
+  return `${slug}-weekly-roundup.ics`;
+}
+
+/** TEXT values: escape backslash, newline, comma and semicolon. */
+function icsText(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n|\n|\r/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
+/** RFC 5545 folds a content line at 75 octets. Our lines are ASCII. */
+function foldIcsLine(line: string): string {
+  if (line.length <= 75) return line;
+  const parts = [line.slice(0, 75)];
+  for (let index = 75; index < line.length; index += 74) {
+    parts.push(` ${line.slice(index, index + 74)}`);
+  }
+  return parts.join('\r\n');
+}
+
+function utcStamp(now: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}Z`;
 }

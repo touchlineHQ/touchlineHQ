@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Select, Loader, Alert, Stack, Title, Group, Button, Paper, Text, Badge, Switch,
-  SegmentedControl, Textarea, Divider,
+  SegmentedControl, Textarea, Divider, Anchor,
 } from '@mantine/core';
 import {
   IconAlertCircle, IconSearch, IconCopy, IconCheck, IconBrandWhatsapp,
   IconBrandTwitter, IconMail, IconShare, IconClockExclamation, IconTrophy,
+  IconCalendar,
 } from '@tabler/icons-react';
 import { loadClubIndex, loadClubFeed } from '../data';
 import type { FeedClubEntry } from '../data';
@@ -19,6 +20,7 @@ import {
 import type { Roundup, RoundupMatch, RoundupUnscoredLine } from '../utils/roundup';
 import { RESTRICTED_RESULTS_NOTICE } from '../utils/compliance';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { latestRoundupUrl, roundupQuery, weeklyReminderUrl } from '../utils/reminder';
 
 type Format = 'whatsapp' | 'social' | 'email';
 
@@ -194,14 +196,17 @@ export function ClubRoundup() {
     };
   }, [selectedClub]);
 
+  // Keep the address in step with the club. The latest week is not written
+  // into the URL: `?club=east-leake` means "whatever was just played", which
+  // is what a weekly reminder has to open. An older week stays pinned.
   useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (selectedClub) next.set('club', selectedClub);
-    else if (clubsLoaded) next.delete('club');
-    if (week) next.set('week', week);
-    else if (selectedClub) next.delete('week');
-    setSearchParams(next, { replace: true });
-  }, [selectedClub, week, clubsLoaded]);
+    if (!clubsLoaded && !selectedClub) return;
+    const latest = feed ? defaultWeek(feed) : null;
+    const desired = roundupQuery(selectedClub, week, latest);
+    if (searchParams.toString() !== desired) {
+      setSearchParams(new URLSearchParams(desired), { replace: true });
+    }
+  }, [selectedClub, week, clubsLoaded, feed, searchParams, setSearchParams]);
 
   const selectedEntry = useMemo(
     () => clubs.find(c => c.slug === selectedClub) ?? null,
@@ -240,11 +245,12 @@ export function ClubRoundup() {
     [roundup],
   );
 
-  // The deep link is this page's own URL with the club and week pinned, so a
-  // recipient who taps it lands on exactly the roundup that was sent.
+  // The link inside a message pins the week, so someone opening it next month
+  // still sees the weekend that was sent. A reminder uses latestRoundupUrl
+  // instead, which deliberately has no week.
   const link = useMemo(() => {
     if (!selectedClub || !week || typeof window === 'undefined') return '';
-    const url = new URL(window.location.href);
+    const url = new URL('/roundup', window.location.origin);
     url.searchParams.set('club', selectedClub);
     url.searchParams.set('week', week);
     return url.toString();
@@ -506,6 +512,19 @@ export function ClubRoundup() {
             >
               Email
             </Button>
+            <Button
+              component="a"
+              href={weeklyReminderUrl(selectedEntry.name, selectedEntry.slug, new Date())}
+              target="_blank"
+              rel="noopener noreferrer"
+              leftSection={<IconCalendar size={18} />}
+              variant="outline"
+              color="green.6"
+              radius="xl"
+              flex="1 0 auto"
+            >
+              Weekly reminder
+            </Button>
             {typeof navigator !== 'undefined' && !!navigator.share && (
               <Button
                 onClick={nativeShare}
@@ -519,6 +538,14 @@ export function ClubRoundup() {
               </Button>
             )}
           </Group>
+
+          <Text size="xs" c="dimmed">
+            Weekly reminder is Tuesday at 7pm, UK time. It opens{' '}
+            <Anchor href={latestRoundupUrl(selectedEntry.slug)} target="_blank" rel="noopener noreferrer">
+              {latestRoundupUrl(selectedEntry.slug)}
+            </Anchor>
+            , with no week saved, so each time it loads the latest roundup.
+          </Text>
 
           {copyFailed && (
             <Alert icon={<IconAlertCircle size={16} />} color="red" title="Copy failed">

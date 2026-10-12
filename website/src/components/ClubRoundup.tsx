@@ -201,12 +201,14 @@ export function ClubRoundup() {
   // is what a weekly reminder has to open. An older week stays pinned.
   useEffect(() => {
     if (!clubsLoaded && !selectedClub) return;
+    // Wait for the feed to settle the week, so a pinned `week` survives loading.
+    if (selectedClub && (loadingFeed || (!feed && !error))) return;
     const latest = feed ? defaultWeek(feed) : null;
     const desired = roundupQuery(selectedClub, week, latest);
     if (searchParams.toString() !== desired) {
       setSearchParams(new URLSearchParams(desired), { replace: true });
     }
-  }, [selectedClub, week, clubsLoaded, feed, searchParams, setSearchParams]);
+  }, [selectedClub, week, clubsLoaded, feed, loadingFeed, error, searchParams, setSearchParams]);
 
   const selectedEntry = useMemo(
     () => clubs.find(c => c.slug === selectedClub) ?? null,
@@ -520,8 +522,10 @@ export function ClubRoundup() {
                 const anchor = document.createElement('a');
                 anchor.href = url;
                 anchor.download = weeklyReminderFilename(selectedEntry.slug);
+                document.body.appendChild(anchor);
                 anchor.click();
-                URL.revokeObjectURL(url);
+                anchor.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
               }}
               leftSection={<IconCalendar size={18} />}
               variant="outline"

@@ -595,7 +595,8 @@ export function ClubRoundup() {
 
           <Text size="xs" c="dimmed">
             Weekly reminder downloads a calendar file for Tuesday at 7pm, UK time.
-            Open it in Apple Calendar, Outlook, Google Calendar, or your mail app. It links to{' '}
+            Import it into Apple Calendar, Outlook, or your mail app. For Google Calendar,
+            use Settings, then Import, on a computer. It links to{' '}
             <Anchor href={latestRoundupUrl(selectedEntry.slug)} target="_blank" rel="noopener noreferrer">
               {latestRoundupUrl(selectedEntry.slug)}
             </Anchor>
@@ -610,11 +611,45 @@ export function ClubRoundup() {
         </Stack>
       )}
 
-      {feed && !roundup && !loadingFeed && (
-        <Alert icon={<IconAlertCircle size={16} />} color="blue" title="No results yet">
-          {selectedEntry?.name} has no published results to round up yet. Check back after the next
-          round of fixtures.
-        </Alert>
+      {feed && !roundup && !loadingFeed && selectedEntry && (
+        <Stack gap="md">
+          <Alert icon={<IconAlertCircle size={16} />} color="blue" title="No results yet">
+            {selectedEntry.name} has no published results to round up yet. Check back after the next
+            round of fixtures.
+          </Alert>
+          <Group gap="sm" wrap="wrap">
+            <Button
+              onClick={() => {
+                const ics = weeklyReminderIcs(selectedEntry.name, selectedEntry.slug, new Date());
+                const file = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+                const url = URL.createObjectURL(file);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = weeklyReminderFilename(selectedEntry.slug);
+                document.body.appendChild(anchor);
+                anchor.click();
+                anchor.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }}
+              leftSection={<IconCalendar size={18} />}
+              variant="outline"
+              color="green.6"
+              radius="xl"
+              flex="1 0 auto"
+            >
+              Weekly reminder
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed">
+            Weekly reminder downloads a calendar file for Tuesday at 7pm, UK time.
+            Import it into Apple Calendar, Outlook, or your mail app. For Google Calendar,
+            use Settings, then Import, on a computer. It links to{' '}
+            <Anchor href={latestRoundupUrl(selectedEntry.slug)} target="_blank" rel="noopener noreferrer">
+              {latestRoundupUrl(selectedEntry.slug)}
+            </Anchor>
+            , with no week saved, so each time it loads the latest roundup.
+          </Text>
+        </Stack>
       )}
     </Stack>
   );

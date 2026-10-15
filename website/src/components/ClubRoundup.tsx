@@ -169,6 +169,7 @@ export function ClubRoundup() {
 
     setLoadingFeed(true);
     setError(null);
+    setFeed(null); // Drop the previous club so URL sync cannot use a stale feed.
     let isCurrent = true;
     loadClubFeed(selectedClub)
       .then(loaded => {
@@ -196,13 +197,34 @@ export function ClubRoundup() {
     };
   }, [selectedClub]);
 
-  // Adopt a Back/Forward `week` change before the sync effect can overwrite it.
-  // The feed effect only depends on selectedClub, so same-club URL week edits
-  // would otherwise leave `week` stale and the sync effect would fight history.
+  // Adopt Back/Forward club/week changes before the sync effect can overwrite
+  // them. Club must be adopted first: resolving week against the previous
+  // club's feed would leave selectedClub stale and sync would rewrite the URL.
   useEffect(() => {
-    if (!selectedClub || loadingFeed || !feed) return;
+    if (!clubsLoaded) return;
     const currentSearch = searchParams.toString();
     if (currentSearch === lastConsumedSearch.current) return;
+
+    const clubParam = searchParams.get('club');
+    const urlClub =
+      clubParam && clubs.some(c => c.slug === clubParam) ? clubParam : null;
+
+    if (urlClub !== selectedClub) {
+      // Suppress sync so it cannot replace club B's URL with club A's while we
+      // switch. Week resolution waits until this club's feed has loaded.
+      urlWeekChangePending.current = true;
+      setSelectedClub(urlClub);
+      setFeed(null);
+      setWeek(null);
+      setLoadingFeed(!!urlClub);
+      return;
+    }
+
+    if (!selectedClub) {
+      lastConsumedSearch.current = currentSearch;
+      return;
+    }
+    if (loadingFeed || !feed) return;
 
     lastConsumedSearch.current = currentSearch;
     const nextWeek = resolveWeekParam(searchParams.get('week'), feed);
@@ -212,7 +234,7 @@ export function ClubRoundup() {
       urlWeekChangePending.current = true;
       setWeek(nextWeek);
     }
-  }, [selectedClub, feed, loadingFeed, searchParams, week]);
+  }, [clubsLoaded, clubs, selectedClub, feed, loadingFeed, searchParams, week]);
 
   // Keep the address in step with the club. The latest week is not written
   // into the URL: `?club=east-leake` means "whatever was just played", which

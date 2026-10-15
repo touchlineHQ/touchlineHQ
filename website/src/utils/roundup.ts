@@ -338,6 +338,15 @@ export function defaultWeek(feed: ClubFeed): string | null {
   return weeksWithMatches(feed)[0] ?? null;
 }
 
+/**
+ * Honour a `week` query param when that Monday has matches; otherwise the
+ * latest week. Shared by the initial feed load and later URL (Back/Forward) updates.
+ */
+export function resolveWeekParam(weekParam: string | null, feed: ClubFeed): string | null {
+  const available = weeksWithMatches(feed);
+  return weekParam && available.includes(weekParam) ? weekParam : defaultWeek(feed);
+}
+
 function isStale(generated: string): boolean {
   const stamp = Date.parse(generated);
   if (Number.isNaN(stamp)) return false;

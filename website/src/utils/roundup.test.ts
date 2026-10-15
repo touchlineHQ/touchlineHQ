@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ClubFeed, LiveFixture, LiveResult, ParticipationEntry } from '../types';
 import {
   addDays, mondayOf, formatDayShort, formatDayRange, stripClubPrefix, getOutcome,
-  weeksWithMatches, defaultWeek, buildRoundup, formatWhatsApp, formatSocial,
+  weeksWithMatches, defaultWeek, resolveWeekParam, buildRoundup, formatWhatsApp, formatSocial,
   formatEmailSubject, formatEmailBody, SOCIAL_LIMIT, unscoredReason,
   formatKickOff, formatKickOffLabel, unscoredMatches, participationMatches,
   withParticipation, hasRecord, scoreline, xWeightedLength,
@@ -241,6 +241,15 @@ describe('week selection', () => {
   it('has no week to offer for a club with no results', () => {
     const empty: ClubFeed = { club: CLUB, generated: '', fixtures: [], results: [] };
     expect(defaultWeek(empty)).toBeNull();
+  });
+
+  it('honours a week query param that the club played in', () => {
+    expect(resolveWeekParam('2026-08-24', makeFeed())).toBe('2026-08-24');
+  });
+
+  it('falls back to the latest week when the query week is missing or unknown', () => {
+    expect(resolveWeekParam(null, makeFeed())).toBe('2026-08-31');
+    expect(resolveWeekParam('2026-01-01', makeFeed())).toBe('2026-08-31');
   });
 });
 

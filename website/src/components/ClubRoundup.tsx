@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Select, Loader, Alert, Stack, Title, Group, Button, Paper, Text, Badge, Switch,
@@ -13,7 +13,7 @@ import { loadClubIndex, loadClubFeed } from '../data';
 import type { FeedClubEntry } from '../data';
 import type { ClubFeed } from '../types';
 import {
-  buildRoundup, defaultWeek, weeksWithMatches, addDays, formatDayRange, formatKickOffLabel,
+  buildRoundup, defaultWeek, weeksWithMatches, resolveWeekParam, addDays, formatDayRange, formatKickOffLabel,
   formatWhatsApp, formatSocial, formatEmailSubject, formatEmailBody, unscoredMatches,
   participationMatches, withParticipation, hasRecord, scoreline, SOCIAL_LIMIT,
 } from '../utils/roundup';
@@ -115,6 +115,8 @@ function SummaryChips({ roundup }: { roundup: Roundup }) {
 
 export function ClubRoundup() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const lastConsumedSearch = useRef(searchParams.toString());
+  const urlWeekChangePending = useRef(false);
   const [clubs, setClubs] = useState<FeedClubEntry[]>([]);
   const [loadingClubs, setLoadingClubs] = useState(true);
   const [clubsLoaded, setClubsLoaded] = useState(false);
@@ -177,9 +179,7 @@ export function ClubRoundup() {
           setWeek(null);
         } else {
           setFeed(loaded);
-          const weekParam = searchParams.get('week');
-          const available = weeksWithMatches(loaded);
-          setWeek(weekParam && available.includes(weekParam) ? weekParam : defaultWeek(loaded));
+          setWeek(resolveWeekParam(searchParams.get('week'), loaded));
         }
         setLoadingFeed(false);
       })
@@ -196,6 +196,24 @@ export function ClubRoundup() {
     };
   }, [selectedClub]);
 
+  // Adopt a Back/Forward `week` change before the sync effect can overwrite it.
+  // The feed effect only depends on selectedClub, so same-club URL week edits
+  // would otherwise leave `week` stale and the sync effect would fight history.
+  useEffect(() => {
+    if (!selectedClub || loadingFeed || !feed) return;
+    const currentSearch = searchParams.toString();
+    if (currentSearch === lastConsumedSearch.current) return;
+
+    lastConsumedSearch.current = currentSearch;
+    const nextWeek = resolveWeekParam(searchParams.get('week'), feed);
+    // Only suppress sync when week actually changes; otherwise let sync strip
+    // a stale pinned latest-week from the address.
+    if (week !== nextWeek) {
+      urlWeekChangePending.current = true;
+      setWeek(nextWeek);
+    }
+  }, [selectedClub, feed, loadingFeed, searchParams, week]);
+
   // Keep the address in step with the club. The latest week is not written
   // into the URL: `?club=east-leake` means "whatever was just played", which
   // is what a weekly reminder has to open. An older week stays pinned.
@@ -203,6 +221,10 @@ export function ClubRoundup() {
     if (!clubsLoaded && !selectedClub) return;
     // Wait for the feed to settle the week, so a pinned `week` survives loading.
     if (selectedClub && (loadingFeed || (!feed && !error))) return;
+    if (urlWeekChangePending.current) {
+      urlWeekChangePending.current = false;
+      return;
+    }
     const latest = feed ? defaultWeek(feed) : null;
     const desired = roundupQuery(selectedClub, week, latest);
     if (searchParams.toString() !== desired) {
